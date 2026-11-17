@@ -1,5 +1,5 @@
 import { Code, Diff, Markdown } from '@justanarthur/modo-ui'
-import { AgentPrompt, Transcript, Working } from '@justanarthur/modo-ui-ai'
+import { AgentPrompt, Transcript } from '@justanarthur/modo-ui-ai'
 import { type ReactNode, useState } from 'react'
 import { allow, answer, deny, type PermissionMode, setPermissionMode } from '../engine/protocol'
 import type { Item, Pending, SessionModel, TextItem, ToolCall, UserItem } from '../engine/session'
@@ -77,14 +77,19 @@ function span(tools: ToolCall[]) {
   return end > start ? end - start : undefined
 }
 
+const waitsOn = (items: Item[], live: Live): boolean =>
+  items.some(i => i.kind === 'tool' && (live.waiting.has(i.id) || waitsOn(i.children, live)))
+
 function Agent({ tool, live }: { tool: ToolCall; live: Live }) {
-  const state = status(tool, live)
+  const own = status(tool, live)
+  // A prompt from one of its tools holds the sub-agent too.
+  const state = own === 'running' && waitsOn(tool.children, live) ? 'waiting' : own
   const tally = [plural(tool.children.filter(i => i.kind === 'tool').length, 'tool use'), tool.durationMs && duration(tool.durationMs)]
   return (
     <Transcript.Agent
       agent={str(tool.input.subagent_type) ?? 'Agent'}
       description={str(tool.input.description) ?? ''}
-      status={state === 'waiting' ? 'running' : state}
+      status={state}
       background={tool.input.run_in_background === true}
       meta={tally.filter(Boolean).join(' · ')}
     >
@@ -127,7 +132,7 @@ function WorkItems({ items, live }: { items: Item[]; live: Live }) {
     if (item.kind === 'tool') out.push(<Agent key={item.id} tool={item} live={live} />)
     else if (item.kind === 'thinking')
       out.push(
-        <Transcript.Thinking key={item.id} duration="a moment">
+        <Transcript.Thinking key={item.id}>
           <p className="m-0 whitespace-pre-wrap">{item.text}</p>
         </Transcript.Thinking>,
       )
@@ -205,7 +210,7 @@ export function SessionTranscript({ model, footer }: { model: SessionModel; foot
           <AssistantTurn key={group[0].id} items={group} streaming={running && i === groups.length - 1} live={live} />
         ),
       )}
-      {running && (!last || last.kind === 'user') && <Working />}
+      {running && (!last || last.kind === 'user') && <Transcript.Working />}
     </Transcript>
   )
 }

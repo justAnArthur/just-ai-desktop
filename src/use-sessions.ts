@@ -207,9 +207,10 @@ export function useSessions() {
     await spawn(target, ['--resume', id, ...flags(options)])
   }
 
-  async function send(id: string, text: string) {
+  /** `options` apply only when this starts the process. */
+  async function send(id: string, text: string, options: Parameters<typeof flags>[0] = {}) {
     try {
-      await resume(id)
+      await resume(id, options)
       await write(id, userMessage(text))
     } catch (error) {
       fail(id, error)
@@ -233,8 +234,18 @@ export function useSessions() {
     await resume(id).catch(error => fail(id, error))
   }
 
-  const toggle = (ids: string[], set: (ids: string[]) => void) => (id: string) =>
-    set(ids.includes(id) ? without(ids, id) : [...ids, id])
+  const setIn = (ids: string[], id: string, on: boolean) => (on ? [...without(ids, id), id] : without(ids, id))
+
+  // Pinned and archived exclude each other: a session shows in one list.
+  function pin(id: string, on: boolean) {
+    setPinned(setIn(pinned, id, on))
+    if (on && archived.includes(id)) setArchived(without(archived, id))
+  }
+
+  function archive(id: string, on: boolean) {
+    setArchived(setIn(archived, id, on))
+    if (on && pinned.includes(id)) setPinned(without(pinned, id))
+  }
 
   return {
     profiles: profiles.map(p => ({
@@ -263,8 +274,11 @@ export function useSessions() {
     restart,
     dismiss,
     rename: (id: string, title: string) => setTitles({ ...titles, [id]: title }),
-    pin: toggle(pinned, setPinned),
-    archive: toggle(archived, setArchived),
+    pin,
+    archive,
+    markUnread: (id: string) => {
+      if (!unread.includes(id)) setUnread([...unread, id])
+    },
     reorderPinned: setPinned,
     refresh: () => setVersion(v => v + 1),
   }

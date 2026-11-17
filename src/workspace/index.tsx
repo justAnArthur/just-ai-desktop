@@ -9,12 +9,12 @@ import SessionSidebar from '@justanarthur/modo-ui-ai/blocks/sessions/session-sid
 import { useIcon } from '@justanarthur/modo-ui-ai/lib/icons'
 import { duration } from '@justanarthur/modo-ui-ai/lib/pace'
 import { useState } from 'react'
-import { allow, deny } from '../engine/protocol'
+import { allow, deny, setModel, setPermissionMode } from '../engine/protocol'
 import { initialSession, type SessionModel } from '../engine/session'
 import { ago, basename, type Entry, groupSessions, inboxOf, statusOf } from '../sessions'
 import { type Exit, NEW, type Sessions, useSessions } from '../use-sessions'
 import { NewSession, type Target } from './new-session'
-import { COMPOSER, modelName, modeLabel, SHORTCUTS } from './options'
+import { COMPOSER, DEFAULT_RUN, flagsOf, modelAlias, modelName, modeLabel, modeValue, type Run, runProps, SHORTCUTS } from './options'
 import { PendingPrompt, SessionTranscript } from './transcript-view'
 
 const firstUserText = (model?: SessionModel) =>
@@ -33,9 +33,11 @@ interface SessionViewProps {
   profile: Profile
   model: SessionModel
   exit?: Exit
+  run: Run
+  onRunChange: (patch: Partial<Run>) => void
 }
 
-function SessionView({ sessions, entry, profile, model, exit }: SessionViewProps) {
+function SessionView({ sessions, entry, profile, model, exit, run, onRunChange }: SessionViewProps) {
   const { id } = entry
   const [loginNote, setLoginNote] = useState(false)
   const busy = sessions.running.includes(id) && (model.status === 'running' || model.status === 'waiting')
@@ -73,18 +75,19 @@ function SessionView({ sessions, entry, profile, model, exit }: SessionViewProps
         <Composer
           key={id}
           {...COMPOSER}
+          {...runProps(run, onRunChange)}
           projects={[{ label: basename(entry.cwd), path: entry.cwd }]}
+          project={entry.cwd}
           branches={entry.gitBranch ? [entry.gitBranch] : []}
           branch={entry.gitBranch}
+          defaultWorktree={false}
           profiles={[profile]}
-          defaultProfile={profile.id}
-          defaultModel={modelName(model.model)}
-          defaultPermissionMode={modeLabel(model.permissionMode)}
+          profile={profile.id}
           context={model.context?.window ? model.context.tokens / model.context.window : 0}
           history={model.turns.flatMap(t => (t.kind === 'user' ? [t.text] : []))}
           status={busy ? 'streaming' : 'idle'}
           onStop={() => sessions.interrupt(id)}
-          onSend={text => sessions.send(id, text)}
+          onSend={text => sessions.send(id, text, flagsOf(run))}
         />
       </div>
     </div>
@@ -99,6 +102,8 @@ export default function Workspace() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [target, setTarget] = useState<Target>({})
   const [targetKey, setTargetKey] = useState(0)
+  // Picks made in a session's composer, over what its process reports.
+  const [runs, setRuns] = useState<Record<string, Partial<Run>>>({})
   const More = useIcon('more-horizontal')
   const Keyboard = useIcon('command')
   const Stop = useIcon('square')
@@ -134,19 +139,38 @@ export default function Workspace() {
   const model = entry ? (models[entry.id] ?? initialSession) : undefined
   const running = entry && sessions.running.includes(entry.id)
 
+  const newSession = (next: Target) => {
+    setTarget(next)
+    setTargetKey(k => k + 1)
+    select(NEW)
+  }
+
   const onPick = (item: PaletteItem) => {
     if (item.kind === 'session') select(item.id)
     if (item.kind === 'shortcuts') setShortcutsOpen(true)
-    if (item.kind === 'new-session' || item.kind === 'profile') {
-      setTarget(item.kind === 'profile' ? { ...target, profileId: item.id } : { cwd: item.project, profileId: item.profile })
-      setTargetKey(k => k + 1)
-      select(NEW)
-    }
+    if (item.kind === 'new-session') newSession({ cwd: item.project, profileId: item.profile })
+    if (item.kind === 'profile') newSession({ ...target, profileId: item.id })
   }
 
-  const start = (options: { cwd: string; profileId: string; text: string }) => {
+  const start = ({ run, ...options }: { cwd: string; profileId: string; text: string; run: Run }) => {
     setTarget({ cwd: options.cwd, profileId: options.profileId })
-    void sessions.start(options)
+    void sessions.start({ ...options, ...flagsOf(run) }).then(id => setRuns(all => ({ ...all, [id]: run })))
+  }
+
+  const runOf = (id: string, model: SessionModel): Run => ({
+    ...DEFAULT_RUN,
+    model: modelName(model.model),
+    mode: modeLabel(model.permissionMode),
+    ...runs[id],
+  })
+
+  // A live process takes model and mode now; effort and fast mode wait for its next start.
+  const configure = (id: string, patch: Partial<Run>) => {
+    setRuns(all => ({ ...all, [id]: { ...all[id], ...patch } }))
+    if (!sessions.running.includes(id)) return
+    if (patch.model) void sessions.respond(id, setModel(modelAlias(patch.model)))
+    const mode = patch.mode && modeValue(patch.mode)
+    if (mode) void sessions.respond(id, setPermissionMode(mode))
   }
 
   return (
@@ -179,6 +203,8 @@ export default function Workspace() {
             projects={projects}
             profiles={profiles}
             commands={[]}
+            panes={false}
+            settings={[]}
             profile={entry?.profileId ?? target.profileId ?? sessions.defaultId ?? undefined}
             project={entry?.cwd ?? target.cwd}
             onSelect={onPick}
@@ -203,12 +229,18 @@ export default function Workspace() {
       }
       left={
         <SessionSidebar
+          // Its pinned Sortable is uncontrolled: it lists only the ids it mounted with.
+          key={grouped.pinned.map(s => s.id).join()}
           {...grouped}
-          // ProfileUsage reads every profile's limits and fails on a profile with none yet.
-          profiles={profiles.filter(p => p.limits.length > 0)}
+          profiles={profiles}
           onPinnedOrderChange={sessions.reorderPinned}
           value={entry ? entry.id : NEW}
           onValueChange={id => id !== 'overview' && select(id)}
+          onPin={sessions.pin}
+          onArchive={sessions.archive}
+          onRename={select}
+          onMarkUnread={sessions.markUnread}
+          onNewSessionIn={group => newSession({ ...target, cwd: group.path })}
           inbox={inbox}
           onInboxAction={(item, action) => {
             if (action === 'open') return select(item.sessionId)
@@ -220,7 +252,15 @@ export default function Workspace() {
       }
       main={
         entry && profile && model ? (
-          <SessionView sessions={sessions} entry={entry} profile={profile} model={model} exit={sessions.exits[entry.id]} />
+          <SessionView
+            sessions={sessions}
+            entry={entry}
+            profile={profile}
+            model={model}
+            exit={sessions.exits[entry.id]}
+            run={runOf(entry.id, model)}
+            onRunChange={patch => configure(entry.id, patch)}
+          />
         ) : (
           <NewSession
             key={targetKey}

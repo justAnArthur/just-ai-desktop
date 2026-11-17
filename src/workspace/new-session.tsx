@@ -1,8 +1,9 @@
 import { Input, Select } from '@justanarthur/modo-ui'
 import type { Profile, Project } from '@justanarthur/modo-ui-ai'
 import Composer from '@justanarthur/modo-ui-ai/blocks/conversation/composer'
+import { useState } from 'react'
 import { basename } from '../sessions'
-import { COMPOSER } from './options'
+import { COMPOSER, DEFAULT_RUN, type Run, runProps } from './options'
 
 export interface Target {
   cwd?: string
@@ -14,12 +15,14 @@ interface NewSessionProps {
   profiles: Profile[]
   target: Target
   onTargetChange: (target: Target) => void
-  onStart: (options: { cwd: string; profileId: string; text: string }) => void
+  onStart: (options: { cwd: string; profileId: string; text: string; run: Run }) => void
 }
 
 export function NewSession({ projects, profiles, target, onTargetChange, onStart }: NewSessionProps) {
-  const cwd = target.cwd ?? projects[0]?.path ?? ''
-  const profileId = target.profileId ?? profiles[0]?.id
+  const [run, setRun] = useState(DEFAULT_RUN)
+  // As the composer resolves them: a pick its list doesn't hold stands for the first entry.
+  const cwd = projects.length && !projects.some(p => p.path === target.cwd) ? projects[0].path : (target.cwd ?? '')
+  const profileId = profiles.some(p => p.id === target.profileId) ? target.profileId : profiles[0]?.id
   if (!profileId) return null
 
   return (
@@ -49,18 +52,20 @@ export function NewSession({ projects, profiles, target, onTargetChange, onStart
         <span className="min-w-0 truncate font-mono text-caption text-muted-foreground">{cwd}</span>
       </div>
       <Composer
-        // The composer's project picker reads its projects once.
-        key={projects.length > 0 ? cwd : 'typed'}
         {...COMPOSER}
+        {...runProps(run, patch => setRun({ ...run, ...patch }))}
         target
-        projects={cwd ? [{ label: basename(cwd), path: cwd }] : []}
+        projects={projects.length > 0 ? projects : cwd ? [{ label: basename(cwd), path: cwd }] : []}
+        project={cwd}
+        onProjectChange={path => onTargetChange({ ...target, cwd: path })}
         branches={[]}
+        defaultWorktree={false}
         profiles={profiles}
-        defaultProfile={profileId}
+        profile={profileId}
         onProfileChange={id => onTargetChange({ ...target, profileId: id })}
         placeholder="Describe the task, or type / for commands"
         context={0}
-        onSend={text => cwd && onStart({ cwd, profileId, text })}
+        onSend={text => cwd && onStart({ cwd, profileId, text, run })}
       />
     </main>
   )
