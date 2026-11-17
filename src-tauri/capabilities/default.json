@@ -24,7 +24,18 @@
     "updater:default",
     "process:default",
     "deep-link:default",
-    "opener:default"
+    "opener:default",
+    {
+      "allow": [
+        {
+          "app": true,
+          "path": "**"
+        }
+      ],
+      "identifier": "opener:allow-open-path"
+    },
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text"
   ],
   "windows": [
     "main",

@@ -63,6 +63,11 @@
     "targets": "all"
   },
   "identifier": "dev.justanarthur.ai-desktop",
+  "plugins": {
+    "opener": {
+      "requireLiteralLeadingDot": false
+    }
+  },
   "productName": "AI Desktop",
   "version": "../package.json"
 }
