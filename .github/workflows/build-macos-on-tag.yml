@@ -1,28 +1,28 @@
 # build-macos-on-tag.yml
 # ---
-# builds Agents for a release tag (`just-agents-desktop@x.y.z`) and attaches the zipped app to that tag's
+# builds AI Desktop for a release tag (`just-ai-desktop@x.y.z`) and attaches the zipped app to that tag's
 # GitHub release (created by release-on-tag.yml from the same tag).
 #
 # the app builds only inside the just-apps platform (workspace packages, crates/app-core), so this
-# checks out just-apps and puts this repo at apps/agents. the PLATFORM_TOKEN secret is a
+# checks out just-apps and puts this repo at apps/ai-desktop. the PLATFORM_TOKEN secret is a
 # fine-grained token with read access to the just-apps repo.
 #
 # bump-version.yml dispatches this workflow for every new tag that matches `push.tags`, passing the
 # tag as the `tag` input — keep that input.
 #
 # the app is ad-hoc signed, not notarized: first launch needs right-click → Open, or
-# `xattr -dr com.apple.quarantine "Agents.app"`.
+# `xattr -dr com.apple.quarantine "AI Desktop.app"`.
 # ---
 name: build-macos-on-tag
 run-name: "macOS app — ${{ inputs.tag || github.ref_name }}"
 
 on:
   push:
-    tags: [ "just-agents-desktop@*" ]
+    tags: [ "just-ai-desktop@*" ]
   workflow_dispatch:
     inputs:
       tag:
-        description: 'tag to build (e.g. "just-agents-desktop@0.2.0")'
+        description: 'tag to build (e.g. "just-ai-desktop@0.2.0")'
         type: string
         required: true
 
@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
-          path: apps/agents
+          path: apps/ai-desktop
 
       - uses: oven-sh/setup-bun@v2
 
@@ -58,13 +58,13 @@ jobs:
       - run: bun install
 
       - name: Build the app
-        run: bun run app build agents --target universal-apple-darwin --bundles app
+        run: bun run app build ai-desktop --target universal-apple-darwin --bundles app
 
       - name: Package
         id: pkg
         run: |
-          zip="just-agents-desktop-${TAG#just-agents-desktop@}.zip"
-          ditto -c -k --sequesterRsrc --keepParent "target/universal-apple-darwin/release/bundle/macos/Agents.app" "$zip"
+          zip="just-ai-desktop-${TAG#just-ai-desktop@}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "target/universal-apple-darwin/release/bundle/macos/AI Desktop.app" "$zip"
           echo "zip=$zip" >> "$GITHUB_OUTPUT"
 
       - name: Attach to the release

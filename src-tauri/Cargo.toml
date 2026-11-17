@@ -1,5 +1,5 @@
 [package]
-name = "app-agents"
+name = "app-ai-desktop"
 version = "0.1.0"
 edition = "2021"
 publish = false

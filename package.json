@@ -1,16 +1,16 @@
 {
-  "name": "just-agents-desktop",
+  "name": "just-ai-desktop",
   "version": "0.1.0",
   "private": true,
   "properties": {
-    "gitCommitScopeRelatedNames": "just-agents-desktop,agents,app,ui,native"
+    "gitCommitScopeRelatedNames": "just-ai-desktop,ai-desktop,app,ui,native"
   },
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "check": "tsc -p . --noEmit",
-    "tauri": "bun ../../packages/cli/src/cli.ts dev agents"
+    "tauri": "bun ../../packages/cli/src/cli.ts dev ai-desktop"
   },
   "dependencies": {
     "@just-apps/app-kit": "workspace:*",

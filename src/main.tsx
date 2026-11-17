@@ -4,4 +4,4 @@ import { createApp } from '@just-apps/app-kit'
 import { version } from '../package.json'
 import Home from './home'
 
-createApp({ name: 'Agents', version, routes: { '/': Home } })
+createApp({ name: 'AI Desktop', version, routes: { '/': Home } })

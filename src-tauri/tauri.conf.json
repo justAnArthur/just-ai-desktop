@@ -33,7 +33,7 @@
         "label": "main",
         "minHeight": 480,
         "minWidth": 720,
-        "title": "Agents",
+        "title": "AI Desktop",
         "titleBarStyle": "Overlay",
         "transparent": true,
         "visible": false,
@@ -62,7 +62,7 @@
     },
     "targets": "all"
   },
-  "identifier": "dev.justanarthur.agents",
-  "productName": "Agents",
+  "identifier": "dev.justanarthur.ai-desktop",
+  "productName": "AI Desktop",
   "version": "../package.json"
 }

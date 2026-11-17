@@ -1,8 +1,8 @@
 {
-  "productName": "Agents",
-  "identifier": "dev.justanarthur.agents",
+  "productName": "AI Desktop",
+  "identifier": "dev.justanarthur.ai-desktop",
   "window": {
-    "title": "Agents",
+    "title": "AI Desktop",
     "width": 1100,
     "height": 720
   }

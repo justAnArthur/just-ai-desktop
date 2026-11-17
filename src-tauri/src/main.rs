@@ -4,5 +4,5 @@ fn main() {
     app_core::builder()
         .invoke_handler(tauri::generate_handler![])
         .run(tauri::generate_context!())
-        .expect("error while running Agents");
+        .expect("error while running AI Desktop");
 }
