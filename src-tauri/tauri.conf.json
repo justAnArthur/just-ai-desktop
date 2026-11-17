@@ -64,5 +64,5 @@
   },
   "identifier": "dev.justanarthur.agents",
   "productName": "Agents",
-  "version": "0.1.0"
+  "version": "../package.json"
 }

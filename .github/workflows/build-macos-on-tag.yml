@@ -1,0 +1,78 @@
+# build-macos-on-tag.yml
+# ---
+# builds Agents for a release tag (`just-agents-desktop@x.y.z`) and attaches the zipped app to that tag's
+# GitHub release (created by release-on-tag.yml from the same tag).
+#
+# the app builds only inside the just-apps platform (workspace packages, crates/app-core), so this
+# checks out just-apps and puts this repo at apps/agents. the PLATFORM_TOKEN secret is a
+# fine-grained token with read access to the just-apps repo.
+#
+# bump-version.yml dispatches this workflow for every new tag that matches `push.tags`, passing the
+# tag as the `tag` input — keep that input.
+#
+# the app is ad-hoc signed, not notarized: first launch needs right-click → Open, or
+# `xattr -dr com.apple.quarantine "Agents.app"`.
+# ---
+name: build-macos-on-tag
+run-name: "macOS app — ${{ inputs.tag || github.ref_name }}"
+
+on:
+  push:
+    tags: [ "just-agents-desktop@*" ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'tag to build (e.g. "just-agents-desktop@0.2.0")'
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/just-apps
+          token: ${{ secrets.PLATFORM_TOKEN }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          path: apps/agents
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: bun install
+
+      - name: Build the app
+        run: bun run app build agents --target universal-apple-darwin --bundles app
+
+      - name: Package
+        id: pkg
+        run: |
+          zip="just-agents-desktop-${TAG#just-agents-desktop@}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "target/universal-apple-darwin/release/bundle/macos/Agents.app" "$zip"
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # the working directory is the just-apps checkout; the release belongs to this repo.
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # release-on-tag.yml creates the release from the same tag, possibly after this build starts.
+          for _ in $(seq 1 30); do gh release view "$TAG" > /dev/null 2>&1 && break; sleep 10; done
+          gh release upload "$TAG" "${{ steps.pkg.outputs.zip }}" --clobber

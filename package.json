@@ -1,7 +1,10 @@
 {
-  "name": "@just-apps/app-agents",
+  "name": "just-agents-desktop",
   "version": "0.1.0",
   "private": true,
+  "properties": {
+    "gitCommitScopeRelatedNames": "just-agents-desktop,agents,app,ui,native"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
