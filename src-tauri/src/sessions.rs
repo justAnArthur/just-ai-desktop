@@ -71,7 +71,7 @@ fn home() -> PathBuf {
 }
 
 /// The login shell's PATH: a GUI app launched from Finder only gets launchd's bare one.
-fn shell_path() -> &'static str {
+pub(crate) fn shell_path() -> &'static str {
     static PATH: OnceLock<String> = OnceLock::new();
     PATH.get_or_init(|| {
         let fallback = env::var("PATH").unwrap_or_default();

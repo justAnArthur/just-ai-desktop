@@ -1,4 +1,5 @@
-import type { ProfileInfo, SessionExit, SessionLine, SessionSummary } from './commands'
+import type { PaneChange } from '@justanarthur/modo-ui-ai'
+import type { GitStatus, ProfileInfo, SessionExit, SessionLine, SessionSummary } from './commands'
 import { SESSION_EXIT, SESSION_LINE } from './commands'
 import stream from './fixtures/stream.jsonl?raw'
 
@@ -81,6 +82,90 @@ function transcript(sessionId: string) {
   ].map(entry => JSON.stringify(entry))
 }
 
+let changes: PaneChange[] = [
+  {
+    path: 'src/auth/redirect.ts',
+    status: 'modified',
+    staged: true,
+    patch: `diff --git a/src/auth/redirect.ts b/src/auth/redirect.ts
+index 3f2a1c4..8b0d9e7 100644
+--- a/src/auth/redirect.ts
++++ b/src/auth/redirect.ts
+@@ -4,9 +4,12 @@ import { session } from './session'
+ export function nextUrl(request: Request) {
+   const url = new URL(request.url)
+-  const next = url.searchParams.get('next') ?? '/'
+-  return session(request) ? next : \`/login?next=\${next}\`
++  const next = url.searchParams.get('next')
++  // Only same-origin paths: an absolute URL here is an open redirect.
++  const safe = next?.startsWith('/') && !next.startsWith('//') ? next : '/'
++  if (url.pathname === '/login') return session(request) ? safe : null
++  return session(request) ? safe : \`/login?next=\${encodeURIComponent(safe)}\`
+ }
+`,
+  },
+  {
+    path: 'src/auth/redirect.test.ts',
+    status: 'added',
+    staged: false,
+    patch: `diff --git a/src/auth/redirect.test.ts b/src/auth/redirect.test.ts
+new file mode 100644
+index 0000000..5d1e2a9
+--- /dev/null
++++ b/src/auth/redirect.test.ts
+@@ -0,0 +1,11 @@
++import { expect, test } from 'bun:test'
++import { nextUrl } from './redirect'
++
++test('stays on /login when signed out', () => {
++  expect(nextUrl(new Request('https://demo.test/login?next=/login'))).toBeNull()
++})
++
++test('drops absolute next urls', () => {
++  const request = new Request('https://demo.test/settings?next=https://evil.test')
++  expect(nextUrl(request)).toBe('/login?next=%2F')
++})
+`,
+  },
+  {
+    path: 'src/routes/login.tsx',
+    status: 'modified',
+    staged: false,
+    patch: `diff --git a/src/routes/login.tsx b/src/routes/login.tsx
+index a41c0de..c7e93b2 100644
+--- a/src/routes/login.tsx
++++ b/src/routes/login.tsx
+@@ -12,7 +12,8 @@ export default function Login() {
+   const [params] = useSearchParams()
+   const navigate = useNavigate()
+   const onSignedIn = () => {
+-    navigate(params.get('next') ?? '/')
++    const next = nextUrl(new Request(location.href))
++    if (next) navigate(next)
+   }
+   return <SignInForm onSignedIn={onSignedIn} />
+ }
+`,
+  },
+  {
+    path: 'src/auth/legacy-redirect.ts',
+    status: 'deleted',
+    staged: false,
+    patch: `diff --git a/src/auth/legacy-redirect.ts b/src/auth/legacy-redirect.ts
+deleted file mode 100644
+index 9e4b7a1..0000000
+--- a/src/auth/legacy-redirect.ts
++++ /dev/null
+@@ -1,4 +0,0 @@
+-// Kept for the v1 login page.
+-export function legacyRedirect(next: string) {
+-  return \`/login?next=\${next}\`
+-}
+`,
+  },
+]
+let ahead = 1
+
 const live = new Map<string, { session: string; turns: number; timers: ReturnType<typeof setTimeout>[] }>()
 
 function replay(key: string, script: string[], emit: Context['emit'], spread: number) {
@@ -140,4 +225,28 @@ export const mockCommands = {
     if (!sessions.some(s => s.id === sessionId)) throw new Error(`no transcript for session ${sessionId}`)
     return transcript(sessionId)
   },
+
+  git_status: (_: { cwd: string }): GitStatus => ({ branch: 'main', upstream: 'origin/main', ahead, behind: 0, changes }),
+
+  git_stage({ paths }: { cwd: string; paths: string[] }) {
+    changes = changes.map(c => (paths.includes(c.path) ? { ...c, staged: true } : c))
+  },
+
+  git_unstage({ paths }: { cwd: string; paths: string[] }) {
+    changes = changes.map(c => (paths.includes(c.path) ? { ...c, staged: false } : c))
+  },
+
+  git_discard({ paths }: { cwd: string; paths: string[] }) {
+    changes = changes.filter(c => c.staged || !paths.includes(c.path))
+  },
+
+  git_commit({ message }: { cwd: string; message: string }) {
+    if (!message.trim()) throw new Error('Aborting commit due to empty commit message.')
+    if (!changes.some(c => c.staged)) throw new Error('nothing added to commit')
+    changes = changes.filter(c => !c.staged)
+    ahead++
+    return crypto.randomUUID().replaceAll('-', '').slice(0, 7)
+  },
+
+  git_branches: (_: { cwd: string }) => ['main', 'feat/dark-mode', 'fix/login-redirect'],
 }
