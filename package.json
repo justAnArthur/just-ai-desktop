@@ -10,12 +10,15 @@
     "dev": "vite",
     "build": "vite build",
     "check": "tsc -p . --noEmit",
-    "tauri": "bun ../../packages/cli/src/cli.ts dev ai-desktop"
+    "tauri": "bun ../../packages/cli/src/cli.ts dev ai-desktop",
+    "test": "bun test"
   },
   "dependencies": {
     "@just-apps/app-kit": "workspace:*",
+    "@just-apps/host-contract": "workspace:*",
     "@just-apps/vite": "workspace:*",
     "@justanarthur/modo-ui": "^2.2.0",
+    "@justanarthur/modo-ui-ai": "^0.2.0",
     "react": "^19",
     "react-dom": "^19"
   },
