@@ -1,4 +1,4 @@
-import { useCommand, useHost } from '@just-apps/app-kit'
+import { useCommand, useHost, useStore } from '@just-apps/app-kit'
 import { Button, DesktopShell, DropdownContent, DropdownMenu, DropdownTrigger, EditableText, MenuItem } from '@justanarthur/modo-ui'
 import type { PaletteItem, Profile, Project, Session } from '@justanarthur/modo-ui-ai'
 import Composer from '@justanarthur/modo-ui-ai/blocks/conversation/composer'
@@ -15,6 +15,7 @@ import { ago, basename, type Entry, groupSessions, inboxOf, statusOf } from '../
 import { type Exit, NEW, type Sessions, useSessions } from '../use-sessions'
 import { NewSession, type Target } from './new-session'
 import { COMPOSER, DEFAULT_RUN, flagsOf, modelAlias, modelName, modeLabel, modeValue, type Run, runProps, SHORTCUTS } from './options'
+import { PANE_TABS, type PaneTab, SidePane } from './side-pane'
 import { PendingPrompt, SessionTranscript } from './transcript-view'
 
 const firstUserText = (model?: SessionModel) =>
@@ -104,6 +105,8 @@ export default function Workspace() {
   const [targetKey, setTargetKey] = useState(0)
   // Picks made in a session's composer, over what its process reports.
   const [runs, setRuns] = useState<Record<string, Partial<Run>>>({})
+  const [paneOpen, setPaneOpen] = useStore('workspace.pane.open', false)
+  const [paneTab, setPaneTab] = useStore<PaneTab>('workspace.pane.tab', 'changes')
   const More = useIcon('more-horizontal')
   const Keyboard = useIcon('command')
   const Stop = useIcon('square')
@@ -150,6 +153,10 @@ export default function Workspace() {
     if (item.kind === 'shortcuts') setShortcutsOpen(true)
     if (item.kind === 'new-session') newSession({ cwd: item.project, profileId: item.profile })
     if (item.kind === 'profile') newSession({ ...target, profileId: item.id })
+    if (item.kind === 'pane' && PANE_TABS.includes(item.pane as PaneTab)) {
+      setPaneTab(item.pane as PaneTab)
+      setPaneOpen(true)
+    }
   }
 
   const start = ({ run, ...options }: { cwd: string; profileId: string; text: string; run: Run }) => {
@@ -178,6 +185,8 @@ export default function Workspace() {
       titleBar="card"
       platform={host.kind === 'tauri' && host.os.platform === 'macos' ? 'mac' : 'linux'}
       leftLabel="Sessions sidebar"
+      rightOpen={paneOpen}
+      onRightOpenChange={setPaneOpen}
       title={
         entry && profile && model ? (
           <>
@@ -203,7 +212,7 @@ export default function Workspace() {
             projects={projects}
             profiles={profiles}
             commands={[]}
-            panes={false}
+            panes={PANE_TABS}
             settings={[]}
             profile={entry?.profileId ?? target.profileId ?? sessions.defaultId ?? undefined}
             project={entry?.cwd ?? target.cwd}
@@ -249,6 +258,21 @@ export default function Workspace() {
           }}
           onSearch={() => setPaletteOpen(true)}
         />
+      }
+      right={
+        entry &&
+        model && (
+          <SidePane
+            cwd={entry.cwd}
+            model={model}
+            open={paneOpen}
+            tab={paneTab}
+            onTabChange={setPaneTab}
+            onClose={() => setPaneOpen(false)}
+            onAsk={text => sessions.send(entry.id, text, flagsOf(runOf(entry.id, model)))}
+            onInterrupt={() => sessions.interrupt(entry.id)}
+          />
+        )
       }
       main={
         entry && profile && model ? (

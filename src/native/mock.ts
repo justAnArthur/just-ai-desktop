@@ -171,9 +171,12 @@ const live = new Map<string, { session: string; turns: number; timers: ReturnTyp
 function replay(key: string, script: string[], emit: Context['emit'], spread: number) {
   const run = live.get(key)
   if (!run) return
+  const turn = run.turns
   script.forEach((line, i) => {
     const timer = setTimeout(() => {
-      emit(SESSION_LINE, { key, line: line.replaceAll(fixtureSession, run.session) } satisfies SessionLine)
+      // Each turn replays the same fixture: its tool ids would repeat in one transcript.
+      const fresh = line.replaceAll(fixtureSession, run.session).replace(/toolu_\w+/g, id => `${id}_${turn}`)
+      emit(SESSION_LINE, { key, line: fresh } satisfies SessionLine)
     }, ((i + 1) * spread) / script.length)
     run.timers.push(timer)
   })
@@ -226,7 +229,10 @@ export const mockCommands = {
     return transcript(sessionId)
   },
 
-  git_status: (_: { cwd: string }): GitStatus => ({ branch: 'main', upstream: 'origin/main', ahead, behind: 0, changes }),
+  git_status({ cwd }: { cwd: string }): GitStatus {
+    if (cwd === '/Users/you/notes') throw new Error(`fatal: not a git repository (or any of the parent directories): .git`)
+    return { branch: 'main', upstream: 'origin/main', ahead, behind: 0, changes }
+  },
 
   git_stage({ paths }: { cwd: string; paths: string[] }) {
     changes = changes.map(c => (paths.includes(c.path) ? { ...c, staged: true } : c))

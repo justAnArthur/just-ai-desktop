@@ -3,6 +3,7 @@ import { AgentPrompt, Transcript } from '@justanarthur/modo-ui-ai'
 import { type ReactNode, useState } from 'react'
 import { allow, answer, deny, type PermissionMode, setPermissionMode } from '../engine/protocol'
 import type { Item, Pending, SessionModel, TextItem, ToolCall, UserItem } from '../engine/session'
+import { duration, isAgent, plural } from '../panes'
 
 const MAX_LINES = 40
 const MAX_CHARS = 4000
@@ -15,19 +16,12 @@ interface Live {
 
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
 const lines = (s: string) => (s ? s.split('\n') : [])
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
-const isAgent = (t: ToolCall) => t.name === 'Agent' || t.name === 'Task'
 
 const summarize = (input: Record<string, unknown>) => SUMMARY_KEYS.map(k => str(input[k])).find(Boolean)?.split('\n')[0] ?? ''
 
 function clip(text: string) {
   const head = lines(text).slice(0, MAX_LINES).join('\n').slice(0, MAX_CHARS)
   return head.length < text.length ? `${head}\n…` : text
-}
-
-function duration(ms: number) {
-  const s = Math.max(1, Math.round(ms / 1000))
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
 function edit(name: string, input: Record<string, unknown>) {
