@@ -1,0 +1,6 @@
+{
+  "productName": "Agents",
+  "identifier": "dev.justanarthur.agents",
+  "version": "0.1.0",
+  "window": { "title": "Agents", "width": 1100, "height": 720 }
+}
