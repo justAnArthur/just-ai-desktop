@@ -54,7 +54,7 @@ fn is_profile(dir: &Path) -> bool {
     dir.join(".claude.json").is_file() || dir.join("settings.json").is_file()
 }
 
-fn expand(home: &Path, dir: &str) -> PathBuf {
+pub(crate) fn expand(home: &Path, dir: &str) -> PathBuf {
     match dir.strip_prefix('~') {
         Some(rest) => home.join(rest.trim_start_matches('/')),
         None => PathBuf::from(dir),
