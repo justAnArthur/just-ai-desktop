@@ -1,6 +1,6 @@
 import { useCommand, useHost, useStore } from '@just-apps/app-kit'
 import { Button, DesktopShell, DropdownContent, DropdownMenu, DropdownTrigger, EditableText, MenuItem } from '@justanarthur/modo-ui'
-import type { PaletteItem, Profile, Project, Session } from '@justanarthur/modo-ui-ai'
+import type { InboxAction, InboxItem, PaletteItem, Profile, Project, Session, SessionGroup } from '@justanarthur/modo-ui-ai'
 import Composer from '@justanarthur/modo-ui-ai/blocks/conversation/composer'
 import FailureState, { type FailureKind } from '@justanarthur/modo-ui-ai/blocks/conversation/failure-states'
 import CommandPalette from '@justanarthur/modo-ui-ai/blocks/dialogs/command-palette'
@@ -8,7 +8,7 @@ import ShortcutsSheet from '@justanarthur/modo-ui-ai/blocks/dialogs/shortcuts-sh
 import SessionSidebar from '@justanarthur/modo-ui-ai/blocks/sessions/session-sidebar'
 import { useIcon } from '@justanarthur/modo-ui-ai/lib/icons'
 import { duration } from '@justanarthur/modo-ui-ai/lib/pace'
-import { useState } from 'react'
+import { memo, useRef, useState } from 'react'
 import { allow, deny, setModel, setPermissionMode } from '../engine/protocol'
 import { initialSession, type SessionModel } from '../engine/session'
 import { ago, basename, type Entry, groupSessions, inboxOf, statusOf } from '../sessions'
@@ -17,6 +17,24 @@ import { NewSession, type Target } from './new-session'
 import { COMPOSER, DEFAULT_RUN, flagsOf, modelAlias, modelName, modeLabel, modeValue, type Run, runProps, SHORTCUTS } from './options'
 import { PANE_TABS, type PaneTab, SidePane } from './side-pane'
 import { PendingPrompt, SessionTranscript } from './transcript-view'
+
+/** Rows the sidebar lists in project folders; ⌘K searches the rest. */
+const SIDEBAR_ROWS = 100
+
+// Every row re-renders with the sidebar, and its props are data plus stable callbacks: re-render on changed data only.
+const Sidebar = memo(SessionSidebar, (a, b) => JSON.stringify(a) === JSON.stringify(b))
+
+type Handlers = Record<string, (...args: never[]) => unknown>
+
+/** Stable stand-ins for this render's callbacks, so a memoized child keeps them without going stale. */
+function useStable<T extends Handlers>(handlers: T): T {
+  const latest = useRef(handlers)
+  latest.current = handlers
+  const [stable] = useState(
+    () => Object.fromEntries(Object.keys(handlers).map(k => [k, (...args: never[]) => latest.current[k](...args)])) as T,
+  )
+  return stable
+}
 
 const firstUserText = (model?: SessionModel) =>
   model?.turns.find(t => t.kind === 'user')?.text.split('\n')[0]?.slice(0, 80) || undefined
@@ -69,6 +87,7 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange }
         </div>
       )}
       <SessionTranscript
+        key={id}
         model={model}
         footer={pending && <PendingPrompt key={pending.requestId} pending={pending} respond={line => sessions.respond(id, line)} />}
       />
@@ -132,7 +151,7 @@ export default function Workspace() {
     }
   })
   const cwdOf = (id: string) => entries.find(e => e.id === id)?.cwd ?? ''
-  const grouped = groupSessions(all, cwdOf, sessions)
+  const grouped = groupSessions(all, cwdOf, { ...sessions, limit: SIDEBAR_ROWS, selected })
   const projects: Project[] = [...new Set(entries.map(e => e.cwd))].map(path => ({ label: basename(path), path }))
   const inbox = inboxOf(
     all.filter(s => s.status === 'waiting').map(s => ({ session: s, model: models[s.id], at: entries.find(e => e.id === s.id)?.updated ?? now })),
@@ -158,6 +177,22 @@ export default function Workspace() {
       setPaneOpen(true)
     }
   }
+
+  const sidebar = useStable({
+    onPinnedOrderChange: sessions.reorderPinned,
+    onValueChange: (id: string) => id !== 'overview' && select(id),
+    onPin: sessions.pin,
+    onArchive: sessions.archive,
+    onRename: select,
+    onMarkUnread: sessions.markUnread,
+    onNewSessionIn: (group: SessionGroup) => newSession({ ...target, cwd: group.path }),
+    onInboxAction: (item: InboxItem, action: InboxAction) => {
+      if (action === 'open') return select(item.sessionId)
+      if (action === 'allow') return sessions.respond(item.sessionId, allow(item.id))
+      if (action === 'deny') return sessions.respond(item.sessionId, deny(item.id, 'Denied by the user.'))
+    },
+    onSearch: () => setPaletteOpen(true),
+  })
 
   const start = ({ run, ...options }: { cwd: string; profileId: string; text: string; run: Run }) => {
     setTarget({ cwd: options.cwd, profileId: options.profileId })
@@ -237,26 +272,14 @@ export default function Workspace() {
         </>
       }
       left={
-        <SessionSidebar
+        <Sidebar
           // Its pinned Sortable is uncontrolled: it lists only the ids it mounted with.
           key={grouped.pinned.map(s => s.id).join()}
           {...grouped}
+          {...sidebar}
           profiles={profiles}
-          onPinnedOrderChange={sessions.reorderPinned}
           value={entry ? entry.id : NEW}
-          onValueChange={id => id !== 'overview' && select(id)}
-          onPin={sessions.pin}
-          onArchive={sessions.archive}
-          onRename={select}
-          onMarkUnread={sessions.markUnread}
-          onNewSessionIn={group => newSession({ ...target, cwd: group.path })}
           inbox={inbox}
-          onInboxAction={(item, action) => {
-            if (action === 'open') return select(item.sessionId)
-            if (action === 'allow') return sessions.respond(item.sessionId, allow(item.id))
-            if (action === 'deny') return sessions.respond(item.sessionId, deny(item.id, 'Denied by the user.'))
-          }}
-          onSearch={() => setPaletteOpen(true)}
         />
       }
       right={

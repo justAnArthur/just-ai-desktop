@@ -53,6 +53,21 @@ test('groups: pinned, sections, projects by folder, archived', () => {
   ])
 })
 
+test('groups: past the limit, only live, unread or selected sessions, and a count of the rest', () => {
+  const s = (id: string, status: Session['status'] = 'idle'): Session => ({ id, title: id, status, profile: 'p', updated: 'now' })
+  const out = groupSessions([s('a'), s('b'), s('c', 'waiting'), s('d'), s('e')], () => '/u/demo', {
+    pinned: ['a'],
+    archived: [],
+    sections: [],
+    limit: 1,
+    selected: 'e',
+  })
+  expect(out.groups.map(g => [g.label, g.sessions.map(x => x.id)])).toEqual([
+    ['demo', ['b', 'c', 'e']],
+    ['1 older in ⌘K', []],
+  ])
+})
+
 test('inbox: one row per waiting prompt', () => {
   const session: Session = { id: 's', title: 'Fix it', status: 'waiting', profile: 'p', updated: 'now', project: 'demo' }
   const model = {

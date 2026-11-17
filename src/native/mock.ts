@@ -82,6 +82,65 @@ function transcript(sessionId: string) {
   ].map(entry => JSON.stringify(entry))
 }
 
+// `?mock=heavy`: the load of real use — 4 profiles × 200 sessions over 30 projects, and long transcripts.
+const heavy = typeof location !== 'undefined' && new URLSearchParams(location.search).get('mock') === 'heavy'
+
+const heavyProfiles: ProfileInfo[] = ['~/.claude', '~/.claude-a', '~/.claude-b', '~/.claude-c'].map((configDir, i) => ({
+  configDir,
+  signedIn: true,
+  email: `user${i}@example.com`,
+  displayName: `User ${i}`,
+  organizationName: `Org ${i}`,
+  organizationType: 'claude_max',
+}))
+
+const heavySessions = (configDir: string): SessionSummary[] =>
+  Array.from({ length: 200 }, (_, i) => {
+    const p = heavyProfiles.findIndex(x => x.configDir === configDir)
+    const n = p * 200 + i
+    return {
+      id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
+      cwd: `/Users/you/projects/project-${(n * 7) % 30}`,
+      title: `Session ${n}: refactor the thing number ${n % 13} and check the tests`,
+      updated: now - n * 600_000,
+      gitBranch: n % 3 ? 'main' : `feat/branch-${n % 11}`,
+    }
+  })
+
+function heavyTranscript(sessionId: string, turns = 300) {
+  const base = { isSidechain: false, userType: 'external', cwd: '/Users/you/projects/project-0', sessionId, gitBranch: 'main' }
+  const at = (s: number) => new Date(now - 10 * hour + s * 1000).toISOString()
+  const out: object[] = []
+  const reply = (t: number) =>
+    `## Turn ${t}\n\nI changed **three** files and ran the tests:\n\n- \`src/a.ts\`: guard the empty case\n- \`src/b.ts\`: rename \`foo\` to \`bar\`\n\n\`\`\`ts\nexport function f(x: number) {\n  return x * ${t}\n}\n\`\`\`\n\nAll ${t} tests pass.`
+  for (let t = 0; t < turns; t++) {
+    const s = t * 60
+    out.push({ ...base, uuid: `u${t}`, timestamp: at(s), type: 'user', message: { role: 'user', content: `Please do step ${t} of the plan and run the tests.` } })
+    const tools = Array.from({ length: 5 }, (_, k) => ({
+      type: 'tool_use',
+      id: `toolu_${t}_${k}`,
+      name: ['Bash', 'Read', 'Edit', 'Grep', 'Bash'][k],
+      input: k === 2 ? { file_path: '/Users/you/projects/project-0/src/a.ts', old_string: 'a\nb\nc', new_string: 'a\nB\nc\nd' } : { command: `bun test --filter step-${t}-${k}`, file_path: `/x/${k}.ts` },
+    }))
+    out.push({
+      ...base,
+      uuid: `a${t}`,
+      timestamp: at(s + 1),
+      type: 'assistant',
+      message: { id: `msg_${t}`, role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'thinking', thinking: `Thinking about step ${t}.` }, ...tools] },
+    })
+    out.push({
+      ...base,
+      uuid: `r${t}`,
+      timestamp: at(s + 20),
+      type: 'user',
+      message: { role: 'user', content: tools.map(tool => ({ type: 'tool_result', tool_use_id: tool.id, content: Array.from({ length: 30 }, (_, l) => `line ${l} of output for ${tool.id}`).join('\n') })) },
+    })
+    out.push({ ...base, uuid: `b${t}`, timestamp: at(s + 30), type: 'assistant', message: { id: `msg_b${t}`, role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text: reply(t) }] } })
+  }
+  return out.map(entry => JSON.stringify(entry))
+}
+
 let changes: PaneChange[] = [
   {
     path: 'src/auth/redirect.ts',
@@ -191,7 +250,7 @@ function stop(key: string) {
 
 export const mockCommands = {
   list_profiles: ({ extra = [] }: { extra?: string[] } = {}) => [
-    ...profiles,
+    ...(heavy ? heavyProfiles : profiles),
     ...extra.map(configDir => ({ configDir, signedIn: false })),
   ],
 
@@ -222,9 +281,11 @@ export const mockCommands = {
 
   session_running: () => [...live.keys()],
 
-  list_sessions: ({ limit = 200 }: { configDir: string; limit?: number }) => sessions.slice(0, limit),
+  list_sessions: ({ configDir, limit = 200 }: { configDir: string; limit?: number }) =>
+    (heavy ? heavySessions(configDir) : sessions).slice(0, limit),
 
   read_transcript({ sessionId }: { configDir: string; sessionId: string }) {
+    if (heavy) return heavyTranscript(sessionId)
     if (!sessions.some(s => s.id === sessionId)) throw new Error(`no transcript for session ${sessionId}`)
     return transcript(sessionId)
   },

@@ -9,6 +9,7 @@ use tauri::{Manager, RunEvent};
 fn main() {
     app_core::builder()
         .manage(sessions::Sessions::default())
+        .manage(sessions::Summaries::default())
         .invoke_handler(tauri::generate_handler![
             git::git_status,
             git::git_stage,

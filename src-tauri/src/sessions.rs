@@ -233,7 +233,7 @@ pub fn session_running(sessions: State<'_, Sessions>) -> Vec<String> {
     sessions.0.lock().unwrap().keys().cloned().collect()
 }
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
     id: String,
@@ -351,20 +351,37 @@ fn transcripts(config_dir: &Path) -> impl Iterator<Item = PathBuf> {
         .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl") && path.is_file())
 }
 
-pub fn sessions_in(config_dir: &Path, limit: usize) -> Vec<SessionSummary> {
-    let mut files: Vec<(PathBuf, u64)> = transcripts(config_dir)
+/// Summaries by transcript, kept while its mtime and size hold: a refresh re-reads only the files that changed.
+#[derive(Default)]
+pub struct Summaries(Mutex<HashMap<PathBuf, (u64, u64, Option<SessionSummary>)>>);
+
+pub fn sessions_in(config_dir: &Path, limit: usize, cache: &Summaries) -> Vec<SessionSummary> {
+    let mut files: Vec<(PathBuf, u64, u64)> = transcripts(config_dir)
         .filter_map(|path| {
-            let modified = path.metadata().ok()?.modified().ok()?;
-            Some((path, modified.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64))
+            let meta = path.metadata().ok()?;
+            let updated = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64;
+            Some((path, updated, meta.len()))
         })
         .collect();
     files.sort_by(|a, b| b.1.cmp(&a.1));
-    files.iter().filter_map(|(path, updated)| summarize(path, *updated)).take(limit).collect()
+    let mut cache = cache.0.lock().unwrap();
+    files
+        .into_iter()
+        .filter_map(|(path, updated, len)| match cache.get(&path) {
+            Some((at, size, summary)) if *at == updated && *size == len => summary.clone(),
+            _ => {
+                let summary = summarize(&path, updated);
+                cache.insert(path, (updated, len, summary.clone()));
+                summary
+            }
+        })
+        .take(limit)
+        .collect()
 }
 
 #[tauri::command]
-pub async fn list_sessions(config_dir: String, limit: Option<usize>) -> Vec<SessionSummary> {
-    sessions_in(&expand(&home(), config_dir.trim_end_matches('/')), limit.unwrap_or(200))
+pub async fn list_sessions(cache: State<'_, Summaries>, config_dir: String, limit: Option<usize>) -> Result<Vec<SessionSummary>, String> {
+    Ok(sessions_in(&expand(&home(), config_dir.trim_end_matches('/')), limit.unwrap_or(200), &cache))
 }
 
 #[tauri::command]
@@ -377,8 +394,62 @@ pub async fn read_transcript(config_dir: String, session_id: String) -> Result<V
     let path = transcripts(&config_dir)
         .find(|path| path.file_name().is_some_and(|n| *n == *name))
         .ok_or_else(|| format!("no transcript for session {session_id}"))?;
-    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    Ok(text.lines().filter(|line| !line.is_empty()).map(str::to_owned).collect())
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    Ok(BufReader::new(file).lines().map_while(Result::ok).filter_map(|line| slim(&line)).collect())
+}
+
+/// What the transcript view reads of an entry: user and assistant messages, without image data or tool-result
+/// copies (`toolUseResult`), which can make a transcript hundreds of MB.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Slim {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    permission_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    uuid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timestamp: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    is_sidechain: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    is_meta: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    is_compact_summary: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    is_api_error_message: bool,
+}
+
+fn slim(line: &str) -> Option<String> {
+    let mut entry: Slim = serde_json::from_str(line).ok()?;
+    if entry.kind != "user" && entry.kind != "assistant" || entry.is_sidechain {
+        return None;
+    }
+    if let Some(blocks) = entry.message.as_mut().and_then(|m| m.get_mut("content")).and_then(|c| c.as_array_mut()) {
+        for block in blocks {
+            strip_images(block);
+            if let Some(inner) = block.get_mut("content").and_then(|c| c.as_array_mut()) {
+                inner.iter_mut().for_each(strip_images);
+            }
+        }
+    }
+    serde_json::to_string(&entry).ok()
+}
+
+// The view counts images but never shows them.
+fn strip_images(block: &mut serde_json::Value) {
+    if block["type"] == "image" {
+        if let Some(block) = block.as_object_mut() {
+            block.remove("source");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -419,7 +490,8 @@ mod tests {
         write(&project.join("old/subagents/agent-a1.jsonl"), &[r#"{"type":"user","cwd":"/x","message":{"content":"hi"}}"#]);
         write(&project.join("empty.jsonl"), &[r#"{"type":"file-history-snapshot"}"#]);
 
-        let all = sessions_in(&dir, 200);
+        let cache = Summaries::default();
+        let all = sessions_in(&dir, 200, &cache);
         let ids: Vec<_> = all.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["new", "old"]);
         assert_eq!(all[0].title.as_deref(), Some("Renamed"));
@@ -428,7 +500,8 @@ mod tests {
         assert_eq!(all[1].title.as_deref(), Some("Fix the login bug please"));
         assert_eq!(all[1].git_branch.as_deref(), Some("main"));
         assert!(all[0].updated >= all[1].updated);
-        assert_eq!(sessions_in(&dir, 1).len(), 1);
+        assert_eq!(sessions_in(&dir, 1, &cache).len(), 1);
+        assert_eq!(sessions_in(&dir, 200, &cache), all);
 
         let first = Entry {
             kind: "user".into(),
@@ -438,6 +511,17 @@ mod tests {
         assert_eq!(first.prompt().unwrap().chars().count(), TITLE_CHARS + 1);
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn slims_transcript_lines() {
+        assert_eq!(slim(r#"{"type":"file-history-snapshot","snapshot":{}}"#), None);
+        assert_eq!(slim(r#"{"type":"user","isSidechain":true,"message":{"content":"x"}}"#), None);
+        let line = r#"{"type":"user","uuid":"u","cwd":"/x","toolUseResult":{"file":"big"},"message":{"role":"user","content":[{"type":"image","source":{"data":"AAAA"}},{"type":"tool_result","tool_use_id":"t","content":[{"type":"text","text":"ok"},{"type":"image","source":{"data":"BBBB"}}]}]}}"#;
+        assert_eq!(
+            slim(line).unwrap(),
+            r#"{"type":"user","message":{"content":[{"type":"image"},{"content":[{"text":"ok","type":"text"},{"type":"image"}],"tool_use_id":"t","type":"tool_result"}],"role":"user"},"cwd":"/x","uuid":"u"}"#
+        );
     }
 
     #[test]

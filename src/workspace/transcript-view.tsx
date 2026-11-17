@@ -1,6 +1,6 @@
-import { Code, Diff, Markdown } from '@justanarthur/modo-ui'
+import { Button, Code, Diff, Markdown } from '@justanarthur/modo-ui'
 import { AgentPrompt, Transcript } from '@justanarthur/modo-ui-ai'
-import { type ReactNode, useState } from 'react'
+import { memo, type ReactNode, useMemo, useState } from 'react'
 import { allow, answer, deny, type PermissionMode, setPermissionMode } from '../engine/protocol'
 import type { Item, Pending, SessionModel, TextItem, ToolCall, UserItem } from '../engine/session'
 import { duration, isAgent, plural } from '../panes'
@@ -146,7 +146,16 @@ function workSummary(items: Item[], streaming: boolean) {
   return ms ? { summary: `Worked for ${duration(ms)}`, detail } : { summary: detail }
 }
 
-function AssistantTurn({ items, streaming, live }: { items: Item[]; streaming: boolean; live: Live }) {
+interface AssistantTurnProps {
+  items: Item[]
+  streaming: boolean
+  live: Live
+}
+
+const sameItems = (a: Item[], b: Item[]) => a.length === b.length && a.every((item, i) => item === b[i])
+
+// Memoized, with reduce() keeping unchanged items identical: a new line re-renders only the turn it touches.
+const AssistantTurn = memo(function AssistantTurn({ items, streaming, live }: AssistantTurnProps) {
   const visible = items.filter(i => i.kind !== 'thinking' || i.text)
   const split = visible.findLastIndex(i => i.kind !== 'text') + 1
   const work = visible.slice(0, split)
@@ -165,9 +174,10 @@ function AssistantTurn({ items, streaming, live }: { items: Item[]; streaming: b
       ))}
     </Transcript.Assistant>
   )
-}
+},
+(a, b) => a.streaming === b.streaming && a.live === b.live && sameItems(a.items, b.items))
 
-function UserTurn({ item }: { item: UserItem }) {
+const UserTurn = memo(function UserTurn({ item }: { item: UserItem }) {
   const images = Array.from({ length: item.attachments }, (_, i) => (
     <Transcript.Attachment key={i} kind="image" name={`Image ${i + 1}`} />
   ))
@@ -176,7 +186,7 @@ function UserTurn({ item }: { item: UserItem }) {
       <span className="whitespace-pre-wrap">{item.text}</span>
     </Transcript.User>
   )
-}
+})
 
 function turns(items: Item[]) {
   const out: Item[][] = []
@@ -188,20 +198,53 @@ function turns(items: Item[]) {
   return out
 }
 
+/** Top-level items a transcript mounts from its end, and per "Show earlier": each mounted turn slows every later render and layout. */
+const TAIL_ITEMS = 200
+
+/** Where the last groups holding at least `items` items start. */
+function tailStart(groups: Item[][], items: number) {
+  let start = groups.length
+  for (let n = 0; start > 0 && n < items; ) n += groups[--start].length
+  return start
+}
+
+const SETTLED: Live = { running: false, waiting: new Set() }
+
+/** A tool still without a result: its status follows the session's. */
+const unsettled = (items: Item[]): boolean => items.some(i => i.kind === 'tool' && (i.result === undefined || unsettled(i.children)))
+
 export function SessionTranscript({ model, footer }: { model: SessionModel; footer?: ReactNode }) {
   const draft: TextItem[] = model.draft ? [{ kind: 'text', id: 'draft', text: model.draft }] : []
   const groups = turns([...model.turns, ...draft])
   const running = model.status === 'running'
-  const live: Live = { running: running || model.status === 'waiting', waiting: new Set(model.pending.map(p => p.toolUseId)) }
+  const busy = running || model.status === 'waiting'
+  const waiting = model.pending.map(p => p.toolUseId).join('\n')
+  const live = useMemo<Live>(() => ({ running: busy, waiting: new Set(waiting.split('\n')) }), [busy, waiting])
+  // The first group shown, fixed once known: a window sliding with each new turn would shift what you read.
+  const [first, setFirst] = useState<string>()
+  const auto = tailStart(groups, TAIL_ITEMS)
+  if (first === undefined && groups.length) setFirst(groups[auto][0].id)
+  const at = groups.findIndex(g => g[0].id === first)
+  const start = at === -1 ? auto : at
   const tasks = model.todos.length > 0 && <Transcript.TaskList items={model.todos} />
   const last = groups.at(-1)?.[0]
   return (
     <Transcript footer={tasks || footer ? <>{tasks}{footer}</> : undefined}>
-      {groups.map((group, i) =>
+      {start > 0 && (
+        <Button variant="ghost" size="compact" className="self-center" onClick={() => setFirst(groups[tailStart(groups.slice(0, start), TAIL_ITEMS)][0].id)}>
+          Show earlier turns
+        </Button>
+      )}
+      {groups.slice(start).map((group, i) =>
         group[0].kind === 'user' ? (
           <UserTurn key={group[0].id} item={group[0]} />
         ) : (
-          <AssistantTurn key={group[0].id} items={group} streaming={running && i === groups.length - 1} live={live} />
+          <AssistantTurn
+            key={group[0].id}
+            items={group}
+            streaming={running && start + i === groups.length - 1}
+            live={unsettled(group) ? live : SETTLED}
+          />
         ),
       )}
       {running && (!last || last.kind === 'user') && <Transcript.Working />}

@@ -22,6 +22,15 @@ const sent = (pending: Pending) => {
 }
 
 describe('SessionTranscript', () => {
+  test('mounts only its last turns, the rest behind a button', () => {
+    const turns = Array.from({ length: 250 }, (_, i) => ({ kind: 'user' as const, id: `u${i}`, text: `message ${i}.`, attachments: 0 }))
+    const out = text(html({ ...initialSession, status: 'idle', turns }))
+    expect(out).toContain('Show earlier turns')
+    expect(out).toContain('message 249.')
+    expect(out).toContain('message 50.')
+    expect(out).not.toContain('message 49.')
+  })
+
   test('past transcript', async () => {
     const out = text(html(fromTranscript(await lines('transcript.jsonl'))))
     for (const text of ['List the files and plan the work', 'Here is a screenshot', 'Image 1', 'Bash', 'Read README', 'Write plan', 'error'])

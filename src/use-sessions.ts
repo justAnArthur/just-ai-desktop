@@ -39,17 +39,20 @@ const flags = ({ model, mode, effort }: Omit<StartOptions, 'profileId' | 'cwd' |
 
 const without = (ids: string[], id: string) => ids.filter(i => i !== id)
 
+/** How long a profile's listing waits for more turns to end before it re-reads its transcripts. */
+const RELIST_DELAY = 1000
+
 export function useSessions() {
   const host = useHost()
   const call = useMemo(() => native(host), [host])
   const { profiles, defaultId, loading } = useProfiles()
-  const [past, setPast] = useState<Entry[]>([])
+  // Per profile: one re-reads its sessions without touching the others' lists.
+  const [lists, setLists] = useState<Record<string, Entry[]>>({})
   const [started, setStarted] = useState<Entry[]>([])
   const [models, setModels] = useState<Record<string, SessionModel>>({})
   const [running, setRunning] = useState<string[]>([])
   const [exits, setExits] = useState<Record<string, Exit>>({})
   const [usage, setUsage] = useState<Record<string, Windows>>({})
-  const [version, setVersion] = useState(0)
   const [titles, setTitles] = useStore<Record<string, string>>('sessions.titles', {})
   const [pinned, setPinned] = useStore<string[]>('sessions.pinned', [])
   const [archived, setArchived] = useStore<string[]>('sessions.archived', [])
@@ -59,10 +62,12 @@ export function useSessions() {
   // Synchronous twins of `running`: a second start must see the first before React re-renders.
   const live = useRef(new Set<string>())
   const killed = useRef(new Set<string>())
+  const listing = useRef(new Map<string, { timer?: ReturnType<typeof setTimeout>; seq: number }>())
 
+  const profileKey = profiles.map(p => `${p.id}=${p.configDir}`).join()
+  const past = useMemo(() => mergeEntries(profiles.map(p => lists[p.id] ?? [])), [lists, profileKey])
   const entries = useMemo(() => mergeEntries([started, past]), [started, past])
   const entryOf = (id: string) => entries.find(e => e.id === id)
-  const profileKey = profiles.map(p => `${p.id}=${p.configDir}`).join()
 
   const update = (id: string, f: (model: SessionModel) => SessionModel) =>
     setModels(all => ({ ...all, [id]: f(all[id] ?? initialSession) }))
@@ -73,20 +78,28 @@ export function useSessions() {
     setRunning([...live.current])
   }
 
-  useEffect(() => {
-    if (loading) return
-    let current = true
-    Promise.allSettled(
-      profiles.map(p =>
-        call('list_sessions', { configDir: p.configDir }).then(list =>
-          list.map((s): Entry => ({ ...s, profileId: p.id, configDir: p.configDir })),
-        ),
-      ),
-    ).then(results => current && setPast(mergeEntries(results.flatMap(r => (r.status === 'fulfilled' ? [r.value] : [])))))
-    return () => {
-      current = false
+  /** Re-lists these profiles after `delay`, one call each however often asked; a stale answer is dropped, an unchanged one kept. */
+  function relist(targets: { id: string; configDir: string }[], delay = 0) {
+    for (const { id, configDir } of targets) {
+      const state = listing.current.get(id) ?? { seq: 0 }
+      listing.current.set(id, state)
+      clearTimeout(state.timer)
+      state.timer = setTimeout(() => {
+        const seq = ++state.seq
+        call('list_sessions', { configDir })
+          .then(list => {
+            if (seq !== state.seq) return
+            const next = list.map((s): Entry => ({ ...s, profileId: id, configDir }))
+            setLists(all => (JSON.stringify(all[id]) === JSON.stringify(next) ? all : { ...all, [id]: next }))
+          })
+          .catch(error => console.error(`[sessions] list of ${configDir}:`, error))
+      }, delay)
     }
-  }, [call, loading, profileKey, version])
+  }
+
+  useEffect(() => {
+    if (!loading) relist(profiles)
+  }, [call, loading, profileKey])
 
   useEffect(() => {
     let current = true
@@ -103,8 +116,11 @@ export function useSessions() {
       for (const id of ids) live.current.add(id)
       setRunning([...live.current])
     })
-    return host.window.onFocusChange(focused => focused && setVersion(v => v + 1))
-  }, [call, host])
+  }, [call])
+
+  useEffect(() => {
+    if (!loading) return host.window.onFocusChange(focused => focused && relist(profiles))
+  }, [host, loading, profileKey])
 
   const entry = entryOf(selected)
   useEffect(() => {
@@ -132,7 +148,9 @@ export function useSessions() {
         void host.store.set(`usage.${profileId}`, windows)
       }
       if (message?.type === 'result') {
-        setVersion(v => v + 1)
+        const entry = entryOf(key)
+        const profile = entry && profiles.find(p => p.id === entry.profileId)
+        if (profile) relist([profile], RELIST_DELAY)
         if (key !== selected && !unread.includes(key)) setUnread([...unread, key])
       }
     },
@@ -280,7 +298,7 @@ export function useSessions() {
       if (!unread.includes(id)) setUnread([...unread, id])
     },
     reorderPinned: setPinned,
-    refresh: () => setVersion(v => v + 1),
+    refresh: () => relist(profiles),
   }
 }
 
