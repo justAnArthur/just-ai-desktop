@@ -67,27 +67,18 @@ export function mergeEntries(lists: Entry[][]) {
   return [...byId.values()].sort((a, b) => b.updated - a.updated)
 }
 
-/**
- * Pinned, the user's sections, then one group per project folder in order of its latest session; archived apart.
- * Past the newest `limit`, project folders list only sessions that are live, unread or `selected`; a last group counts the rest.
- */
+/** Pinned, the user's sections, then one group per project folder in order of its latest session; archived apart. */
 export function groupSessions(
   sessions: Session[],
   cwdOf: (id: string) => string,
-  { pinned, archived, sections, limit = Infinity, selected }: { pinned: string[]; archived: string[]; sections: Section[]; limit?: number; selected?: string },
+  { pinned, archived, sections }: { pinned: string[]; archived: string[]; sections: Section[] },
 ) {
   const byId = new Map(sessions.map(s => [s.id, s]))
   const pick = (ids: string[]) => ids.flatMap(id => byId.get(id) ?? [])
   const placed = new Set([...pinned, ...archived, ...sections.flatMap(s => s.ids)])
   const projects = new Map<string, SessionGroup>()
-  let listed = 0
-  let hidden = 0
   for (const session of sessions) {
     if (placed.has(session.id)) continue
-    if (listed++ >= limit && session.status === 'idle' && session.id !== selected) {
-      hidden++
-      continue
-    }
     const cwd = cwdOf(session.id)
     const group = projects.get(cwd) ?? { label: basename(cwd), kind: 'project', path: cwd, sessions: [] }
     projects.set(cwd, group)
@@ -95,11 +86,7 @@ export function groupSessions(
   }
   return {
     pinned: pick(pinned).map(s => ({ ...s, pinned: true })),
-    groups: [
-      ...sections.map((s): SessionGroup => ({ label: s.label, kind: 'section', sessions: pick(s.ids) })),
-      ...projects.values(),
-      ...(hidden ? [{ label: `${hidden} older in ⌘K`, kind: 'section' as const, sessions: [] }] : []),
-    ],
+    groups: [...sections.map((s): SessionGroup => ({ label: s.label, kind: 'section', sessions: pick(s.ids) })), ...projects.values()],
     archived: pick(archived),
   }
 }

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { initialSession, reduce, type SessionModel, type ToolCall } from './engine/session'
-import { hunks, sameChanges, tasksOf, touches } from './panes'
+import { sameChanges, tasksOf, touches } from './panes'
 
 const all = await Bun.file(new URL('./engine/fixtures/subagent.jsonl', import.meta.url))
   .text()
@@ -55,9 +55,4 @@ test('changes compare by value', () => {
   expect(sameChanges([change], [{ ...change }])).toBe(true)
   expect(sameChanges([change], [{ ...change, staged: true }])).toBe(false)
   expect(sameChanges([change], [])).toBe(false)
-})
-
-test('patches from their first hunk', () => {
-  expect(hunks('diff --git a/a b/a\nindex 1..2 100644\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b\n')).toBe('@@ -1 +1 @@\n-a\n+b\n')
-  expect(hunks('diff --git a/a b/b\nrename from a\nrename to b\n')).toBe('diff --git a/a b/b\nrename from a\nrename to b\n')
 })

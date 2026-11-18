@@ -93,7 +93,7 @@ function Agent({ tool, live }: { tool: ToolCall; live: Live }) {
   )
 }
 
-function WorkItems({ items, live }: { items: Item[]; live: Live }) {
+export function WorkItems({ items, live }: { items: Item[]; live: Live }) {
   const out: ReactNode[] = []
   let run: ToolCall[] = []
   const flush = () => {

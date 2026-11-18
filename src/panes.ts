@@ -44,9 +44,3 @@ export function tasksOf(model: SessionModel): PaneTask[] {
 export const sameChanges = (a: PaneChange[], b: PaneChange[]) =>
   a.length === b.length &&
   a.every((c, i) => c.path === b[i].path && c.staged === b[i].staged && c.status === b[i].status && c.patch === b[i].patch)
-
-/** A git patch from its first hunk: the Diff block reads `diff --git`, `index` and mode lines as context. A patch without hunks (a rename, a binary) stays whole. */
-export function hunks(patch: string) {
-  const at = patch.search(/^@@ /m)
-  return at > 0 ? patch.slice(at) : patch
-}

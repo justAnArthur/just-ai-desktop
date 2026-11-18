@@ -15,13 +15,13 @@ import { ago, basename, type Entry, groupSessions, inboxOf, statusOf } from '../
 import { type Exit, NEW, type Sessions, useSessions } from '../use-sessions'
 import { NewSession, type Target } from './new-session'
 import { COMPOSER, DEFAULT_RUN, flagsOf, modelAlias, modelName, modeLabel, modeValue, type Run, runProps, SHORTCUTS } from './options'
-import { PANE_TABS, type PaneTab, SidePane } from './side-pane'
+import { PANE_TABS, type PaneTab, SessionPane } from './side-pane'
 import { PendingPrompt, SessionTranscript } from './transcript-view'
 
-/** Rows the sidebar lists in project folders; ⌘K searches the rest. */
-const SIDEBAR_ROWS = 100
+/** Rows a sidebar group lists before its Show more. */
+const GROUP_ROWS = 5
 
-// Every row re-renders with the sidebar, and its props are data plus stable callbacks: re-render on changed data only.
+// The kit memoizes rows and groups, but the sidebar itself would still re-render with every stream line: re-render on changed data only.
 const Sidebar = memo(SessionSidebar, (a, b) => JSON.stringify(a) === JSON.stringify(b))
 
 type Handlers = Record<string, (...args: never[]) => unknown>
@@ -100,7 +100,7 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange }
           project={entry.cwd}
           branches={entry.gitBranch ? [entry.gitBranch] : []}
           branch={entry.gitBranch}
-          defaultWorktree={false}
+          targetOptions={{ worktree: false, baseBranch: false, setupScript: false }}
           profiles={[profile]}
           profile={profile.id}
           context={model.context?.window ? model.context.tokens / model.context.window : 0}
@@ -108,6 +108,7 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange }
           status={busy ? 'streaming' : 'idle'}
           onStop={() => sessions.interrupt(id)}
           onSend={text => sessions.send(id, text, flagsOf(run))}
+          onCompact={() => sessions.send(id, '/compact', flagsOf(run))}
         />
       </div>
     </div>
@@ -151,7 +152,7 @@ export default function Workspace() {
     }
   })
   const cwdOf = (id: string) => entries.find(e => e.id === id)?.cwd ?? ''
-  const grouped = groupSessions(all, cwdOf, { ...sessions, limit: SIDEBAR_ROWS, selected })
+  const grouped = groupSessions(all, cwdOf, sessions)
   const projects: Project[] = [...new Set(entries.map(e => e.cwd))].map(path => ({ label: basename(path), path }))
   const inbox = inboxOf(
     all.filter(s => s.status === 'waiting').map(s => ({ session: s, model: models[s.id], at: entries.find(e => e.id === s.id)?.updated ?? now })),
@@ -249,6 +250,8 @@ export default function Workspace() {
             commands={[]}
             panes={PANE_TABS}
             settings={[]}
+            searchTranscripts={false}
+            manageProfiles={false}
             profile={entry?.profileId ?? target.profileId ?? sessions.defaultId ?? undefined}
             project={entry?.cwd ?? target.cwd}
             onSelect={onPick}
@@ -273,9 +276,8 @@ export default function Workspace() {
       }
       left={
         <Sidebar
-          // Its pinned Sortable is uncontrolled: it lists only the ids it mounted with.
-          key={grouped.pinned.map(s => s.id).join()}
           {...grouped}
+          groupLimit={GROUP_ROWS}
           {...sidebar}
           profiles={profiles}
           value={entry ? entry.id : NEW}
@@ -285,9 +287,10 @@ export default function Workspace() {
       right={
         entry &&
         model && (
-          <SidePane
+          <SessionPane
             cwd={entry.cwd}
             model={model}
+            live={sessions.running.includes(entry.id)}
             open={paneOpen}
             tab={paneTab}
             onTabChange={setPaneTab}

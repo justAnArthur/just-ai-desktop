@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { ReactElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { fromTranscript, initialSession, type Pending, reduce, type SessionModel } from '../engine/session'
-import { PendingPrompt, SessionTranscript } from './transcript-view'
+import { PendingPrompt, SessionTranscript, WorkItems } from './transcript-view'
 
 const lines = (name: string) =>
   Bun.file(new URL(`../engine/fixtures/${name}`, import.meta.url)).text().then(t => t.split('\n').filter(Boolean))
@@ -12,6 +12,10 @@ const replay = (all: string[], until = all.length) => all.slice(0, until).reduce
 const text = (html: string) => html.replace(/<[^>]+>/g, '').replaceAll('&amp;', '&')
 
 const html = (model: SessionModel) => renderToStaticMarkup(<SessionTranscript model={model} />)
+
+// A turn's work folds, and a folded body doesn't render: its items render on their own.
+const work = (model: SessionModel) =>
+  text(renderToStaticMarkup(<WorkItems items={model.turns.filter(t => t.kind !== 'user')} live={{ running: false, waiting: new Set() }} />))
 
 const prompt = (pending: Pending) => text(renderToStaticMarkup(<PendingPrompt pending={pending} respond={() => {}} />))
 
@@ -32,9 +36,10 @@ describe('SessionTranscript', () => {
   })
 
   test('past transcript', async () => {
-    const out = text(html(fromTranscript(await lines('transcript.jsonl'))))
-    for (const text of ['List the files and plan the work', 'Here is a screenshot', 'Image 1', 'Bash', 'Read README', 'Write plan', 'error'])
-      expect(out).toContain(text)
+    const model = fromTranscript(await lines('transcript.jsonl'))
+    const out = text(html(model))
+    for (const text of ['List the files and plan the work', 'Here is a screenshot', 'Image 1', '3 tool calls', 'Read README', 'Write plan']) expect(out).toContain(text)
+    for (const text of ['Bash', 'missing.md', 'error']) expect(work(model)).toContain(text)
   })
 
   test('live permission stream: question, write, draft, result', async () => {
@@ -64,7 +69,9 @@ describe('SessionTranscript', () => {
   })
 
   test('sub-agent run', async () => {
-    const out = text(html(replay(await lines('subagent.jsonl'))))
+    const model = replay(await lines('subagent.jsonl'))
+    expect(text(html(model))).toContain('1 tool call · 1 agent')
+    const out = work(model)
     for (const text of ['general-purpose', 'Read hello.txt contents', '1 tool use', 'I did not modify anything', 'Write'])
       expect(out).toContain(text)
     expect(out).not.toContain('Subagent hand-back')
@@ -82,7 +89,7 @@ describe('SessionTranscript', () => {
       draft: '',
     }
     const out = text(html(odd))
-    expect(out).toContain('mcp__x__y')
+    expect(work(odd)).toContain('mcp__x__y')
     expect(out).toContain('Working…')
     expect(out).toContain('Step one')
   })
