@@ -229,24 +229,22 @@ export function SessionTranscript({ model, footer }: { model: SessionModel; foot
   const tasks = model.todos.length > 0 && <Transcript.TaskList items={model.todos} />
   const last = groups.at(-1)?.[0]
   return (
-    <Transcript footer={tasks || footer ? <>{tasks}{footer}</> : undefined}>
+    <Transcript className="select-text" footer={tasks || footer ? <>{tasks}{footer}</> : undefined}>
       {start > 0 && (
         <Button variant="ghost" size="compact" className="self-center" onClick={() => setFirst(groups[tailStart(groups.slice(0, start), TAIL_ITEMS)][0].id)}>
           Show earlier turns
         </Button>
       )}
-      {groups.slice(start).map((group, i) =>
-        group[0].kind === 'user' ? (
-          <UserTurn key={group[0].id} item={group[0]} />
-        ) : (
-          <AssistantTurn
-            key={group[0].id}
-            items={group}
-            streaming={running && start + i === groups.length - 1}
-            live={unsettled(group) ? live : SETTLED}
-          />
-        ),
-      )}
+      {groups.slice(start).map((group, i) => (
+        // Off-screen turns skip layout, so a resize (the side pane's drag, the window) re-lays out only the visible ones.
+        <div key={group[0].id} className="content-visibility-auto [contain-intrinsic-size:auto_20rem]">
+          {group[0].kind === 'user' ? (
+            <UserTurn item={group[0]} />
+          ) : (
+            <AssistantTurn items={group} streaming={running && start + i === groups.length - 1} live={unsettled(group) ? live : SETTLED} />
+          )}
+        </div>
+      ))}
       {running && (!last || last.kind === 'user') && <Transcript.Working />}
     </Transcript>
   )
