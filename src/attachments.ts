@@ -12,6 +12,12 @@ const MAX_IMAGE = 3.7 * MB
 const MAX_PDF = 10 * MB
 const MAX_TEXT = 100 * 1024
 
+/** The longest side of the thumbnail a sent message shows. */
+const THUMB_PX = 320
+
+/** An attachment as sent, with a small data URL of an image for the sent message to show. */
+export type Attached = Attachment & { preview?: string }
+
 const size = (bytes: number) => (bytes < MB ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / MB).toFixed(1)} MB`)
 
 function base64(bytes: Uint8Array) {
@@ -22,11 +28,33 @@ function base64(bytes: Uint8Array) {
 
 const isText = (file: File) => file.type.startsWith('text/') || file.type === 'application/json' || TEXT_EXTENSIONS.some(e => file.name.toLowerCase().endsWith(e))
 
-async function read(file: File): Promise<Attachment | string> {
+// Drawn small, so a long session keeps no full-size copy of each picture it shows.
+async function thumbnail(file: File) {
+  if (typeof document === 'undefined') return
+  const url = URL.createObjectURL(file)
+  try {
+    const image = new Image()
+    image.src = url
+    await image.decode()
+    const scale = Math.min(1, THUMB_PX / Math.max(image.naturalWidth, image.naturalHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+    canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL(file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png')
+  } catch {
+    return
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+async function read(file: File): Promise<Attached | string> {
   const bytes = async () => new Uint8Array(await file.arrayBuffer())
   if (IMAGES.includes(file.type)) {
     if (file.size > MAX_IMAGE) return `${file.name} is ${size(file.size)}; images go up to ${size(MAX_IMAGE)}`
-    return { kind: 'image', mediaType: file.type, data: base64(await bytes()) }
+    const [data, preview] = await Promise.all([bytes().then(base64), thumbnail(file)])
+    return { kind: 'image', mediaType: file.type, data, ...(preview && { preview }) }
   }
   if (file.type === 'application/pdf') {
     if (file.size > MAX_PDF) return `${file.name} is ${size(file.size)}; PDFs go up to ${size(MAX_PDF)}`
@@ -45,7 +73,7 @@ async function read(file: File): Promise<Attachment | string> {
 export async function readAttachments(files: File[]) {
   const results = await Promise.all(files.map(read))
   return {
-    attachments: results.filter((r): r is Attachment => typeof r !== 'string'),
+    attachments: results.filter((r): r is Attached => typeof r !== 'string'),
     rejected: results.filter((r): r is string => typeof r === 'string'),
   }
 }

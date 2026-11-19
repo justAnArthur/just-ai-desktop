@@ -1,8 +1,9 @@
 import { useHost, useStore } from '@just-apps/app-kit'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { type Attachment, interrupt as interruptLine, type Line, type PermissionMode, userMessage } from '@just-apps/claude-code'
+import { interrupt as interruptLine, type Line, type PermissionMode, userMessage } from '@just-apps/claude-code'
 import { canStop, type Commands, fromTranscript, initialSession, reduce, type SessionModel } from '@just-apps/claude-code'
 import { SESSION_EXIT, SESSION_LINE, type SessionExit, type SessionLine } from '@just-apps/claude-code'
+import type { Attached } from './attachments'
 import { native } from './native/commands'
 import { createNotifier, noticeOf } from './notify'
 import { type Entry, limitsOf, mergeEntries, type Section, type Windows } from './sessions'
@@ -15,7 +16,7 @@ export interface StartOptions {
   profileId: string
   cwd: string
   text: string
-  attachments?: Attachment[]
+  attachments?: Attached[]
   model?: string
   mode?: PermissionMode
   effort?: string
@@ -34,11 +35,25 @@ function parse(line: string) {
   }
 }
 
-const flags = ({ model, mode, effort }: Pick<StartOptions, 'model' | 'mode' | 'effort'>) => [
+type Flags = Pick<StartOptions, 'model' | 'mode' | 'effort'>
+
+const flags = ({ model, mode, effort }: Flags) => [
   ...(model ? ['--model', model] : []),
   ...(mode ? ['--permission-mode', mode] : []),
   ...(effort ? ['--effort', effort] : []),
+  // Lets the composer switch a live session to bypass; it starts in `mode` all the same.
+  '--allow-dangerously-skip-permissions',
 ]
+
+/** The user turn a line just added, with each image's thumbnail over the full-size data the line carried. */
+function withPreviews(model: SessionModel, attachments: Attached[]) {
+  const previews = attachments.filter(a => a.kind === 'image').map(a => a.preview)
+  const last = model.turns.at(-1)
+  if (!previews.some(Boolean) || last?.kind !== 'user') return model
+  let image = 0
+  const shown = last.attachments.map(a => (a.kind === 'image' ? { ...a, src: previews[image++] ?? a.src } : a))
+  return { ...model, turns: [...model.turns.slice(0, -1), { ...last, attachments: shown }] }
+}
 
 const without = (ids: string[], id: string) => ids.filter(i => i !== id)
 
@@ -251,20 +266,22 @@ export function useSessions() {
 
   const fail = (id: string, error: unknown) => update(id, model => ({ ...model, status: 'failed', error: String(error) }))
 
-  async function spawn(target: Entry, args: string[]) {
+  async function spawn(target: Entry, args: string[], options: Flags) {
     if (live.current.has(target.id)) return
     setLive(target.id, true)
     setExits(({ [target.id]: _, ...rest }) => rest)
+    // The mode it starts in, until its `system/init` says so.
+    if (options.mode) update(target.id, model => ({ ...model, permissionMode: options.mode }))
     try {
-      await call('session_start', { key: target.id, configDir: target.configDir, cwd: target.cwd, args })
+      await call('session_start', { key: target.id, configDir: target.configDir, cwd: target.cwd, args: [...args, ...flags(options)] })
     } catch (error) {
       setLive(target.id, false)
       throw error
     }
   }
 
-  async function write(id: string, line: string) {
-    update(id, model => reduce(model, line))
+  async function write(id: string, line: string, attachments: Attached[] = []) {
+    update(id, model => withPreviews(reduce(model, line), attachments))
     await call('session_write', { key: id, line })
   }
 
@@ -282,8 +299,8 @@ export function useSessions() {
     setModels(all => ({ ...all, [id]: initialSession }))
     select(id)
     try {
-      await spawn(target, ['--session-id', id, ...flags(options)])
-      await write(id, userMessage(text, attachments))
+      await spawn(target, ['--session-id', id], options)
+      await write(id, userMessage(text, attachments), attachments)
     } catch (error) {
       fail(id, error)
     }
@@ -291,17 +308,17 @@ export function useSessions() {
   }
 
   /** Starts the session's process with `--resume` unless it runs already. */
-  async function resume(id: string, options: Parameters<typeof flags>[0] = {}) {
+  async function resume(id: string, options: Flags = {}) {
     const target = entryOf(id)
     if (!target) throw new Error(`no session ${id}`)
-    await spawn(target, ['--resume', id, ...flags(options)])
+    await spawn(target, ['--resume', id], options)
   }
 
   /** `options` apply only when this starts the process. */
-  async function send(id: string, text: string, options: Parameters<typeof flags>[0] = {}, attachments: Attachment[] = []) {
+  async function send(id: string, text: string, options: Flags = {}, attachments: Attached[] = []) {
     try {
       await resume(id, options)
-      await write(id, userMessage(text, attachments))
+      await write(id, userMessage(text, attachments), attachments)
     } catch (error) {
       fail(id, error)
     }

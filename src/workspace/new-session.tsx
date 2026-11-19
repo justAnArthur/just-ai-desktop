@@ -2,7 +2,7 @@ import { Input, Select } from '@justanarthur/modo-ui'
 import type { Profile, Project } from '@justanarthur/modo-ui-ai'
 import Composer from '@justanarthur/modo-ui-ai/blocks/conversation/composer'
 import { useState } from 'react'
-import type { Attachment } from '@just-apps/claude-code'
+import type { Attached } from '../attachments'
 import type { Commands } from '@just-apps/claude-code'
 import { basename } from '../sessions'
 import { attach, Skipped } from './attach'
@@ -20,7 +20,7 @@ interface NewSessionProps {
   commands: Record<string, Commands>
   target: Target
   onTargetChange: (target: Target) => void
-  onStart: (options: { cwd: string; profileId: string; text: string; attachments: Attachment[]; run: Run }) => void
+  onStart: (options: { cwd: string; profileId: string; text: string; attachments: Attached[]; run: Run }) => void
 }
 
 export function NewSession({ projects, profiles, commands, target, onTargetChange, onStart }: NewSessionProps) {

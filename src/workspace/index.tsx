@@ -1,5 +1,5 @@
 import { useCommand, useHost, useStore } from '@just-apps/app-kit'
-import { Button, DesktopShell, DropdownContent, DropdownMenu, DropdownTrigger, EditableText, MenuItem } from '@justanarthur/modo-ui'
+import { Button, DesktopShell, DropdownContent, DropdownMenu, DropdownTrigger, Input, MenuItem } from '@justanarthur/modo-ui'
 import type { InboxAction, InboxItem, PaletteItem, Profile, Project, Session, SessionGroup } from '@justanarthur/modo-ui-ai'
 import Composer from '@justanarthur/modo-ui-ai/blocks/conversation/composer'
 import FailureState, { type FailureKind } from '@justanarthur/modo-ui-ai/blocks/conversation/failure-states'
@@ -9,8 +9,9 @@ import SessionSidebar from '@justanarthur/modo-ui-ai/blocks/sessions/session-sid
 import { useIcon } from '@justanarthur/modo-ui-ai/lib/icons'
 import { duration } from '@justanarthur/modo-ui-ai/lib/pace'
 import { memo, useEffect, useRef, useState } from 'react'
-import { allow, type Attachment, deny, setModel, setPermissionMode } from '@just-apps/claude-code'
+import { allow, deny, setModel, setPermissionMode } from '@just-apps/claude-code'
 import { initialSession, type SessionModel } from '@just-apps/claude-code'
+import type { Attached } from '../attachments'
 import { ago, basename, type Entry, groupSessions, inboxOf, statusOf } from '../sessions'
 import { type Exit, NEW, type Sessions, useSessions } from '../use-sessions'
 import { attach, Skipped } from './attach'
@@ -63,6 +64,35 @@ function failureOf(model: SessionModel): FailureKind {
   return 'cli-crashed'
 }
 
+/**
+ * The session's title as plain text, an input only while renaming: the title bar zooms the window on a double-click,
+ * which must not start an edit.
+ */
+function SessionTitle({ title, renaming, onRename, onDone }: { title: string; renaming: boolean; onRename: (title: string) => void; onDone: () => void }) {
+  // pl-2 is a compact field's text inset: renaming doesn't move the text.
+  if (!renaming) return <span className="min-w-0 truncate pl-2 text-body weight-medium text-foreground">{title}</span>
+  const finish = (value: string) => {
+    const next = value.trim()
+    if (next && next !== title) onRename(next)
+    onDone()
+  }
+  return (
+    <Input
+      aria-label="Session title"
+      defaultValue={title}
+      size="compact"
+      className="min-w-24 max-w-md"
+      autoFocus
+      onFocus={e => e.currentTarget.select()}
+      onBlur={e => finish(e.currentTarget.value)}
+      onKeyDown={e => {
+        if (e.key === 'Enter') finish(e.currentTarget.value)
+        if (e.key === 'Escape') onDone()
+      }}
+    />
+  )
+}
+
 interface SessionViewProps {
   sessions: Sessions
   entry: Entry
@@ -111,6 +141,7 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange }
       />
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
         <Skipped reasons={skipped} />
+        {model.refused && <p className="m-0 text-caption text-destructive">Claude Code refused: {model.refused}</p>}
         <Composer
           key={id}
           {...COMPOSER}
@@ -149,9 +180,11 @@ export default function Workspace() {
   const [targetKey, setTargetKey] = useState(0)
   // Picks made in a session's composer, over what its process reports.
   const [runs, setRuns] = useState<Record<string, Partial<Run>>>({})
+  const [renaming, setRenaming] = useState<string>()
   const [paneOpen, setPaneOpen] = useStore('workspace.pane.open', false)
   const [paneTab, setPaneTab] = useStore<PaneTab>('workspace.pane.tab', 'changes')
   const More = useIcon('more-horizontal')
+  const Pencil = useIcon('pencil')
   const Keyboard = useIcon('command')
   const Stop = useIcon('square')
   useMinuteTick()
@@ -209,7 +242,10 @@ export default function Workspace() {
     onValueChange: (id: string) => id !== 'overview' && select(id),
     onPin: sessions.pin,
     onArchive: sessions.archive,
-    onRename: select,
+    onRename: (id: string) => {
+      select(id)
+      setRenaming(id)
+    },
     onMarkUnread: sessions.markUnread,
     onNewSessionIn: (group: SessionGroup) => newSession({ ...target, cwd: group.path }),
     onInboxAction: (item: InboxItem, action: InboxAction) => {
@@ -220,22 +256,24 @@ export default function Workspace() {
     onSearch: () => setPaletteOpen(true),
   })
 
-  const start = ({ run, ...options }: { cwd: string; profileId: string; text: string; attachments: Attachment[]; run: Run }) => {
+  const start = ({ run, ...options }: { cwd: string; profileId: string; text: string; attachments: Attached[]; run: Run }) => {
     setTarget({ cwd: options.cwd, profileId: options.profileId })
     void sessions.start({ ...options, ...flagsOf(run) }).then(id => setRuns(all => ({ ...all, [id]: run })))
   }
 
-  const runOf = (id: string, model: SessionModel): Run => ({
-    ...DEFAULT_RUN,
-    model: modelName(model.model),
-    mode: modeLabel(model.permissionMode),
-    ...runs[id],
-  })
+  // A live process's mode is the one it reports: a switch it refused doesn't show as made.
+  const runOf = (id: string, model: SessionModel): Run => {
+    const run = { ...DEFAULT_RUN, model: modelName(model.model), mode: modeLabel(model.permissionMode), ...runs[id] }
+    return sessions.running.includes(id) && model.permissionMode ? { ...run, mode: modeLabel(model.permissionMode) } : run
+  }
 
   // A live process takes model and mode now; effort waits for its next start.
   const configure = (id: string, patch: Partial<Run>) => {
-    setRuns(all => ({ ...all, [id]: { ...all[id], ...patch } }))
-    if (!sessions.running.includes(id)) return
+    const live = sessions.running.includes(id)
+    const { mode: _, ...kept } = patch
+    // The live mode lives in the model, from the process; a pick kept here would outlast it.
+    setRuns(all => ({ ...all, [id]: { ...all[id], ...(live ? kept : patch) } }))
+    if (!live) return
     if (patch.model) void sessions.respond(id, setModel(modelAlias(patch.model)))
     const mode = patch.mode && modeValue(patch.mode)
     if (mode) void sessions.respond(id, setPermissionMode(mode))
@@ -251,11 +289,12 @@ export default function Workspace() {
       title={
         entry && profile && model ? (
           <>
-            <EditableText
-              label="Session title"
-              value={titleOf(entry)}
-              onValueChange={title => sessions.rename(entry.id, title)}
-              className="min-w-24 weight-medium"
+            <SessionTitle
+              key={entry.id}
+              title={titleOf(entry)}
+              renaming={renaming === entry.id}
+              onRename={title => sessions.rename(entry.id, title)}
+              onDone={() => setRenaming(undefined)}
             />
             <span className="hidden shrink-0 text-caption text-muted-foreground @2xl:inline">
               {profile.name} · {model.model ?? profile.defaultModel}
@@ -293,8 +332,9 @@ export default function Workspace() {
               }
             />
             <DropdownContent align="end" sideOffset={4} className="w-60 min-w-0">
-              <MenuItem index={0} icon={Keyboard} label="Keyboard shortcuts" onSelect={() => setShortcutsOpen(true)} />
-              {running && <MenuItem index={1} icon={Stop} label="End the claude process" onSelect={() => sessions.kill(entry.id)} />}
+              {entry && <MenuItem index={0} icon={Pencil} label="Rename" onSelect={() => setRenaming(entry.id)} />}
+              <MenuItem index={1} icon={Keyboard} label="Keyboard shortcuts" onSelect={() => setShortcutsOpen(true)} />
+              {running && <MenuItem index={2} icon={Stop} label="End the claude process" onSelect={() => sessions.kill(entry.id)} />}
             </DropdownContent>
           </DropdownMenu>
         </>

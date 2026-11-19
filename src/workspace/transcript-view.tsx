@@ -2,7 +2,7 @@ import { Button, Code, Diff, Markdown } from '@justanarthur/modo-ui'
 import { AgentPrompt, Transcript } from '@justanarthur/modo-ui-ai'
 import { memo, type ReactNode, useMemo, useState } from 'react'
 import { allow, answer, deny, type PermissionUpdate, setPermissionMode } from '@just-apps/claude-code'
-import type { Item, Pending, SessionModel, TextItem, ToolCall, UserItem } from '@just-apps/claude-code'
+import type { CompactItem, Item, Pending, SessionModel, TextItem, ToolCall, UserItem } from '@just-apps/claude-code'
 import { duration, isAgent, plural, summarize } from '../panes'
 
 const MAX_LINES = 40
@@ -175,7 +175,11 @@ const AssistantTurn = memo(function AssistantTurn({ items, streaming, live }: As
 (a, b) => a.streaming === b.streaming && a.live === b.live && sameItems(a.items, b.items))
 
 const UserTurn = memo(function UserTurn({ item }: { item: UserItem }) {
-  const chips = item.attachments.map((a, i) => <Transcript.Attachment key={i} kind={a.kind} name={a.name} />)
+  // `src` (an image's thumbnail) is read by the kit's Attachment from its next release; this one shows the chip alone.
+  const chips = item.attachments.map((a, i) => {
+    const props = { kind: a.kind, name: a.name, src: a.src }
+    return <Transcript.Attachment key={i} {...props} />
+  })
   return (
     <Transcript.User attachments={chips.length ? chips : undefined}>
       <span className="whitespace-pre-wrap">{item.text}</span>
@@ -183,14 +187,34 @@ const UserTurn = memo(function UserTurn({ item }: { item: UserItem }) {
   )
 })
 
+/** A compaction: a fold like a turn's work, with the summary the session went on from. */
+const Compacted = memo(function Compacted({ item }: { item: CompactItem }) {
+  return (
+    <Transcript.Work summary="Conversation compacted" detail={item.summary ? 'Summary' : undefined}>
+      {item.summary ? <Markdown className="text-muted-foreground">{item.summary}</Markdown> : <Transcript.Working label="Summarizing" />}
+    </Transcript.Work>
+  )
+})
+
+/** Items that stand alone between turns, not part of an assistant's. */
+const standalone = (item: Item) => item.kind === 'user' || item.kind === 'compact' || item.kind === 'interrupted'
+
 function turns(items: Item[]) {
   const out: Item[][] = []
   for (const item of items) {
     const last = out.at(-1)
-    if (item.kind !== 'user' && last && last[0].kind !== 'user') last.push(item)
+    if (!standalone(item) && last && !standalone(last[0])) last.push(item)
     else out.push([item])
   }
   return out
+}
+
+function Group({ group, streaming, live }: { group: Item[]; streaming: boolean; live: Live }) {
+  const [first] = group
+  if (first.kind === 'user') return <UserTurn item={first} />
+  if (first.kind === 'compact') return <Compacted item={first} />
+  if (first.kind === 'interrupted') return <p className="m-0 text-caption text-muted-foreground">Interrupted</p>
+  return <AssistantTurn items={group} streaming={streaming} live={unsettled(group) ? live : SETTLED} />
 }
 
 /** Top-level items a transcript mounts from its end, and per "Show earlier": each mounted turn slows every later render and layout. */
@@ -222,18 +246,7 @@ const sameGroups = (a: Item[][], b: Item[][]) => a.length === b.length && a.ever
 
 const Block = memo(function Block({ groups, streaming, live }: BlockProps) {
   // The kit's turns skip layout off-screen themselves (content-visibility), since modo-ui-ai 0.5.
-  return groups.map((group, i) =>
-    group[0].kind === 'user' ? (
-      <UserTurn key={group[0].id} item={group[0]} />
-    ) : (
-      <AssistantTurn
-        key={group[0].id}
-        items={group}
-        streaming={streaming && i === groups.length - 1}
-        live={unsettled(group) ? live : SETTLED}
-      />
-    ),
-  )
+  return groups.map((group, i) => <Group key={group[0].id} group={group} streaming={streaming && i === groups.length - 1} live={live} />)
 },
 (a, b) => a.streaming === b.streaming && a.live === b.live && sameGroups(a.groups, b.groups))
 
@@ -266,7 +279,7 @@ export function SessionTranscript({ model, footer }: { model: SessionModel; foot
         const to = blocks[i + 1] ?? groups.length
         return <Block key={Math.floor(from / BLOCK)} groups={groups.slice(from, to)} streaming={running && to === groups.length} live={live} />
       })}
-      {running && (!last || last.kind === 'user') && <Transcript.Working />}
+      {running && (!last || standalone(last)) && <Transcript.Working label={model.compacting ? 'Compacting the conversation' : undefined} />}
     </Transcript>
   )
 }

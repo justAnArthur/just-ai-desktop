@@ -50,6 +50,19 @@ describe('SessionTranscript', () => {
     for (const text of ['Bash', 'missing.md', 'error']) expect(work(model)).toContain(text)
   })
 
+  test('a compaction is a folded row, an interrupt a marker, no harness tags', () => {
+    const turns = [
+      { kind: 'user' as const, id: 'u', text: 'go', attachments: [] },
+      { kind: 'interrupted' as const, id: 'i' },
+      { kind: 'compact' as const, id: 'c', summary: 'Summary: fix it.' },
+    ]
+    const out = text(html({ ...initialSession, status: 'idle', turns }))
+    expect(out).toContain('Interrupted')
+    expect(out).toContain('Conversation compacted')
+    expect(out).not.toContain('[Request interrupted')
+    expect(out).not.toContain('system-reminder')
+  })
+
   test('live permission stream: question, write, draft, result', async () => {
     const all = await lines('permission.jsonl')
     const asked = all.findIndex(l => l.includes('"can_use_tool"')) + 1

@@ -1,6 +1,7 @@
 import type { PaneChange } from '@justanarthur/modo-ui-ai'
 import { type ProfileInfo, SESSION_EXIT, SESSION_LINE, type SessionExit, type SessionLine, type SessionSummary } from '@just-apps/claude-code'
 import type { GitStatus } from './commands'
+import image from './fixtures/image.png.b64?raw'
 import stream from './fixtures/stream.jsonl?raw'
 
 interface Context {
@@ -79,6 +80,55 @@ function transcript(sessionId: string) {
       message: { id: 'msg_02', type: 'message', role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: 'It typechecks the project with `tsc --noEmit`.' }], stop_reason: 'end_turn' },
     },
     { type: 'custom-title', customTitle: 'What does bun run check do', sessionId },
+  ].map(entry => JSON.stringify(entry))
+}
+
+const SUMMARY = `This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<system-reminder>
+<tools-used-before-summary>Read, Edit</tools-used-before-summary>
+</system-reminder>
+Summary:
+1. Primary Request and Intent:
+   Add a dark mode toggle to the settings screen.
+2. Files touched:
+   - \`src/settings/appearance.tsx\`: the toggle
+3. Pending: wire the toggle to the theme store.`
+
+/** A session with a pasted image, an interrupted turn and a /compact, as a transcript records them. */
+function compacted(sessionId: string) {
+  const base = { isSidechain: false, userType: 'external', cwd: '/Users/you/projects/demo', sessionId, gitBranch: 'feat/dark-mode' }
+  const at = (s: number) => new Date(now - 3 * hour + s * 1000).toISOString()
+  const reply = (uuid: string, s: number, text: string) => ({
+    ...base,
+    uuid,
+    timestamp: at(s),
+    type: 'assistant',
+    message: { id: `msg_${uuid}`, role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text }] },
+  })
+  return [
+    {
+      ...base,
+      uuid: 'u1',
+      timestamp: at(0),
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: image.trim() } },
+          { type: 'text', text: 'Add dark mode to settings, like in this mockup.' },
+        ],
+      },
+    },
+    reply('a1', 4, 'I added a **Dark mode** switch under Appearance.'),
+    { ...base, uuid: 'u2', timestamp: at(10), type: 'user', message: { role: 'user', content: 'Now make it follow the system theme too.' } },
+    { ...base, uuid: 'u3', timestamp: at(12), type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } },
+    { ...base, uuid: 'u4', timestamp: at(20), type: 'user', message: { role: 'user', content: '<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>' } },
+    { ...base, type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted', uuid: 'b1', timestamp: at(30) },
+    { ...base, uuid: 'u5', timestamp: at(30), type: 'user', isCompactSummary: true, isVisibleInTranscriptOnly: true, message: { role: 'user', content: SUMMARY } },
+    { ...base, uuid: 'u6', timestamp: at(31), type: 'user', message: { role: 'user', content: '<local-command-stdout>Compacted </local-command-stdout>' } },
+    { ...base, uuid: 'u7', timestamp: at(40), type: 'user', message: { role: 'user', content: 'Where were we?' } },
+    reply('a2', 44, 'The switch is in place; next is wiring it to the theme store.'),
   ].map(entry => JSON.stringify(entry))
 }
 
@@ -225,7 +275,7 @@ index 9e4b7a1..0000000
 ]
 let ahead = 1
 
-const live = new Map<string, { session: string; turns: number; timers: ReturnType<typeof setTimeout>[] }>()
+const live = new Map<string, { session: string; turns: number; timers: ReturnType<typeof setTimeout>[]; bypass: boolean; mode: string }>()
 
 function replay(key: string, script: string[], emit: Context['emit'], spread: number) {
   const run = live.get(key)
@@ -234,7 +284,10 @@ function replay(key: string, script: string[], emit: Context['emit'], spread: nu
   script.forEach((line, i) => {
     const timer = setTimeout(() => {
       // Each turn replays the same fixture: its tool ids would repeat in one transcript.
-      const fresh = line.replaceAll(fixtureSession, run.session).replace(/toolu_\w+/g, id => `${id}_${turn}`)
+      const fresh = line
+        .replaceAll(fixtureSession, run.session)
+        .replace(/toolu_\w+/g, id => `${id}_${turn}`)
+        .replace(/"permissionMode":"\w+"/, `"permissionMode":"${run.mode}"`)
       emit(SESSION_LINE, { key, line: fresh } satisfies SessionLine)
     }, ((i + 1) * spread) / script.length)
     run.timers.push(timer)
@@ -254,9 +307,11 @@ export const mockCommands = {
     ...extra.map(configDir => ({ configDir, signedIn: false })),
   ],
 
-  session_start({ key }: { key: string }, { emit }: Context) {
+  session_start({ key, args }: { key: string; args: string[] }, { emit }: Context) {
     if (live.has(key)) throw new Error(`session ${key} is already running`)
-    live.set(key, { session: crypto.randomUUID(), turns: 0, timers: [] })
+    const bypass = args.includes('--allow-dangerously-skip-permissions') || args.includes('--dangerously-skip-permissions')
+    const at = args.indexOf('--permission-mode')
+    live.set(key, { session: crypto.randomUUID(), turns: 0, timers: [], bypass, mode: at === -1 ? 'default' : args[at + 1] })
     replay(key, startup, emit, 300)
   },
 
@@ -266,13 +321,34 @@ export const mockCommands = {
     // An e2e test reads what the app wrote by defining this array first.
     ;(globalThis as { sessionWrites?: SessionLine[] }).sessionWrites?.push({ key, line })
     const message = JSON.parse(line)
+    const send = (line: object) => emit(SESSION_LINE, { key, line: JSON.stringify(line) } satisfies SessionLine)
     if (message.type === 'control_request') {
-      if (message.request.subtype === 'interrupt') run.timers.splice(0).forEach(clearTimeout)
-      const response = { type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: {} } }
-      emit(SESSION_LINE, { key, line: JSON.stringify(response) } satisfies SessionLine)
+      const { subtype, mode } = message.request
+      if (subtype === 'interrupt') run.timers.splice(0).forEach(clearTimeout)
+      // As the CLI answers: bypass only for a process started to allow it.
+      if (subtype === 'set_permission_mode' && mode === 'bypassPermissions' && !run.bypass) {
+        const error = 'Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions'
+        return send({ type: 'control_response', response: { subtype: 'error', request_id: message.request_id, error } })
+      }
+      send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: {} } })
+      if (subtype === 'set_permission_mode') {
+        run.mode = mode
+        send({ type: 'system', subtype: 'status', status: null, permissionMode: mode })
+      }
       return
     }
     if (message.type !== 'user') return
+    if (message.message.content === '/compact') {
+      const lines = [
+        { type: 'system', subtype: 'status', status: 'compacting' },
+        { type: 'system', subtype: 'status', status: null, compact_result: 'success' },
+        { type: 'system', subtype: 'compact_boundary', uuid: crypto.randomUUID(), compact_metadata: { trigger: 'manual' } },
+        { type: 'user', message: { role: 'user', content: SUMMARY }, parent_tool_use_id: null, uuid: crypto.randomUUID(), isSynthetic: true },
+        { type: 'user', message: { role: 'user', content: '<local-command-stdout>Compacted </local-command-stdout>' }, parent_tool_use_id: null, uuid: crypto.randomUUID(), isReplay: true },
+        { type: 'result', subtype: 'success', is_error: false, duration_ms: 0, num_turns: 0, session_id: run.session, usage: { input_tokens: 0, output_tokens: 0 } },
+      ]
+      return replay(key, lines.map(line => JSON.stringify(line)), emit, 2500)
+    }
     replay(key, run.turns++ === 0 ? turn : followUp, emit, 2000)
   },
 
@@ -289,7 +365,7 @@ export const mockCommands = {
   read_transcript({ sessionId }: { configDir: string; sessionId: string }) {
     if (heavy) return heavyTranscript(sessionId)
     if (!sessions.some(s => s.id === sessionId)) throw new Error(`no transcript for session ${sessionId}`)
-    return transcript(sessionId)
+    return sessionId === sessions[1].id ? compacted(sessionId) : transcript(sessionId)
   },
 
   git_status({ cwd }: { cwd: string }): GitStatus {
