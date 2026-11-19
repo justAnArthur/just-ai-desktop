@@ -66,6 +66,9 @@ const IDLE_STOP = 10 * 60_000
 /** How soon after the last refresh a focus refreshes the session lists again: switching windows often re-reads nothing. */
 const FOCUS_STALE = 30_000
 
+/** How many recently viewed sessions keep their transcript in memory; a running or waiting one always does. */
+const KEEP_MODELS = 3
+
 /** Calls `f` on focus at most every `stale` ms. */
 function onFocusEvery(host: { window: { onFocusChange(f: (focused: boolean) => void): () => void } }, stale: number, f: () => void) {
   let last = Date.now()
@@ -268,6 +271,16 @@ export function useSessions() {
       current = false
     }
   }, [call, selected, entry?.configDir])
+
+  // A long transcript is megabytes once parsed: keep the last few viewed, and every live or waiting one; reopening reads it again.
+  const recent = useRef<string[]>([])
+  useEffect(() => {
+    recent.current = [selected, ...recent.current.filter(id => id !== selected)].slice(0, KEEP_MODELS)
+    setModels(all => {
+      const keep = Object.keys(all).filter(id => recent.current.includes(id) || live.current.has(id) || all[id].pending.length > 0)
+      return keep.length === Object.keys(all).length ? all : Object.fromEntries(keep.map(id => [id, all[id]]))
+    })
+  }, [selected])
 
   titleRef.current = id =>
     titles[id] ?? entryOf(id)?.title ?? models[id]?.turns.find(t => t.kind === 'user')?.text.split('\n')[0]?.slice(0, 80) ?? 'Untitled session'
