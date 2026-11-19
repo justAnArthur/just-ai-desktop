@@ -226,16 +226,19 @@ interface BlockProps {
 const sameGroups = (a: Item[][], b: Item[][]) => a.length === b.length && a.every((group, i) => sameItems(group, b[i]))
 
 const Block = memo(function Block({ groups, streaming, live }: BlockProps) {
-  return groups.map((group, i) => (
-    // Off-screen turns skip layout, so a resize (the side pane's drag, the window) re-lays out only the visible ones.
-    <div key={group[0].id} className="content-visibility-auto [contain-intrinsic-size:auto_20rem]">
-      {group[0].kind === 'user' ? (
-        <UserTurn item={group[0]} />
-      ) : (
-        <AssistantTurn items={group} streaming={streaming && i === groups.length - 1} live={unsettled(group) ? live : SETTLED} />
-      )}
-    </div>
-  ))
+  // The kit's turns skip layout off-screen themselves (content-visibility), since modo-ui-ai 0.5.
+  return groups.map((group, i) =>
+    group[0].kind === 'user' ? (
+      <UserTurn key={group[0].id} item={group[0]} />
+    ) : (
+      <AssistantTurn
+        key={group[0].id}
+        items={group}
+        streaming={streaming && i === groups.length - 1}
+        live={unsettled(group) ? live : SETTLED}
+      />
+    ),
+  )
 },
 (a, b) => a.streaming === b.streaming && a.live === b.live && sameGroups(a.groups, b.groups))
 
