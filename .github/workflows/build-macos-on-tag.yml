@@ -62,9 +62,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # just-apps lists every app as a workspace; only this one is checked out here.
+      # just-apps lists every app as a workspace; only this one is checked out here (the others are empty submodule dirs).
       - name: Keep the workspaces this checkout has
-        run: bun -e 'const fs = require("fs"); const p = await Bun.file("package.json").json(); p.workspaces = p.workspaces.filter(w => w.includes("*") || fs.existsSync(w)); await Bun.write("package.json", JSON.stringify(p, null, 2))'
+        run: bun -e 'const fs = require("fs"); const p = await Bun.file("package.json").json(); p.workspaces = p.workspaces.filter(w => w.includes("*") || fs.existsSync(`${w}/package.json`)); await Bun.write("package.json", JSON.stringify(p, null, 2))'
 
       - run: bun install
 
