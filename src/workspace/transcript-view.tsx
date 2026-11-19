@@ -187,13 +187,9 @@ const UserTurn = memo(function UserTurn({ item }: { item: UserItem }) {
   )
 })
 
-/** A compaction: a fold like a turn's work, with the summary the session went on from. */
+/** A compaction: the kit's divider, opening to the summary the session went on from. */
 const Compacted = memo(function Compacted({ item }: { item: CompactItem }) {
-  return (
-    <Transcript.Work summary="Conversation compacted" detail={item.summary ? 'Summary' : undefined}>
-      {item.summary ? <Markdown className="text-muted-foreground">{item.summary}</Markdown> : <Transcript.Working label="Summarizing" />}
-    </Transcript.Work>
-  )
+  return item.summary ? <Transcript.Compact summary={item.summary} /> : <Transcript.Working label="Summarizing" />
 })
 
 /** Items that stand alone between turns, not part of an assistant's. */
@@ -213,7 +209,7 @@ function Group({ group, streaming, live }: { group: Item[]; streaming: boolean; 
   const [first] = group
   if (first.kind === 'user') return <UserTurn item={first} />
   if (first.kind === 'compact') return <Compacted item={first} />
-  if (first.kind === 'interrupted') return <p className="m-0 text-caption text-muted-foreground">Interrupted</p>
+  if (first.kind === 'interrupted') return <Transcript.Notice>Interrupted</Transcript.Notice>
   return <AssistantTurn items={group} streaming={streaming} live={unsettled(group) ? live : SETTLED} />
 }
 

@@ -28,6 +28,7 @@
     "windows": [
       {
         "center": true,
+        "dragDropEnabled": false,
         "height": 720,
         "hiddenTitle": true,
         "label": "main",

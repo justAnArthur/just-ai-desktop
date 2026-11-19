@@ -45,8 +45,10 @@ describe('SessionTranscript', () => {
 
   test('past transcript', async () => {
     const model = fromTranscript(await lines('transcript.jsonl'))
-    const out = text(html(model))
-    for (const text of ['List the files and plan the work', 'Here is a screenshot', 'Image 1', '3 tool calls', 'Read README', 'Write plan']) expect(out).toContain(text)
+    const markup = html(model)
+    const out = text(markup)
+    for (const text of ['List the files and plan the work', 'Here is a screenshot', '3 tool calls', 'Read README', 'Write plan']) expect(out).toContain(text)
+    expect(markup).toContain('aria-label="View Image 1"')
     for (const text of ['Bash', 'missing.md', 'error']) expect(work(model)).toContain(text)
   })
 

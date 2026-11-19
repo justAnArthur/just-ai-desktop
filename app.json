@@ -4,6 +4,7 @@
   "window": {
     "title": "AI Desktop",
     "width": 1100,
-    "height": 720
+    "height": 720,
+    "dragDropEnabled": false
   }
 }
