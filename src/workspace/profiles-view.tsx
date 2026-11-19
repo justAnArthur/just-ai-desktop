@@ -6,6 +6,7 @@ import type { Profile } from '@justanarthur/modo-ui-ai'
 import { ProfileTile } from '@justanarthur/modo-ui-ai/blocks/profiles/profile-switcher'
 import { useIcon } from '@justanarthur/modo-ui-ai/lib/icons'
 import { useState } from 'react'
+import { canUpdate, checkForUpdate } from '../use-update'
 import type { Profiles } from '../use-profiles'
 
 interface CardProps {
@@ -105,6 +106,8 @@ interface ProfilesViewProps {
 
 /** Every profile the app runs sessions under, as the kit's profiles page lays them out. */
 export function ProfilesView({ profiles, state, onSignIn, onAdd }: ProfilesViewProps) {
+  const host = useHost()
+  const [checking, setChecking] = useState(false)
   const shape = useShape()
   const Plus = useIcon('plus')
   const running = profiles.reduce((n, p) => n + p.running, 0)
@@ -142,6 +145,24 @@ export function ProfilesView({ profiles, state, onSignIn, onAdd }: ProfilesViewP
             </Button>
           </div>
         </section>
+        <footer className="flex items-center gap-3 px-1 text-caption text-muted-foreground">
+          <span>
+            {host.app.name} {host.app.version}
+          </span>
+          {canUpdate(host) && (
+            <Button
+              size="compact"
+              variant="ghost"
+              loading={checking}
+              onClick={() => {
+                setChecking(true)
+                void checkForUpdate(host, true).finally(() => setChecking(false))
+              }}
+            >
+              Check for updates
+            </Button>
+          )}
+        </footer>
       </div>
     </main>
   )

@@ -1,6 +1,6 @@
 # build-macos-on-tag.yml
 # ---
-# builds AI Desktop for a release tag (`just-ai-desktop@x.y.z`) and attaches the zipped app to that tag's
+# builds JustAIDesktop for a release tag (`just-ai-desktop@x.y.z`) and attaches the zipped app to that tag's
 # GitHub release (created by release-on-tag.yml from the same tag).
 #
 # the app builds only inside the just-apps platform (workspace packages, crates/app-core), so this
@@ -10,14 +10,14 @@
 # bump-version.yml dispatches this workflow for every new tag that matches `push.tags`, passing the
 # tag as the `tag` input — keep that input.
 #
-# self-update: the build also makes the updater's bundle (`just-ai-desktop.app.tar.gz`, signed with the
+# self-update: the build also makes the updater's bundle (`JustAIDesktop.app.tar.gz`, signed with the
 # TAURI_SIGNING_PRIVATE_KEY secret, whose public key is `updater.pubkey` in app.json) and a `latest.json`
 # pointing at it. The app reads releases/latest/download/latest.json, so this repo must be public.
 #
 # code signing: with the MACOS_CERT_P12 (base64) and MACOS_CERT_PASSWORD secrets, the app is signed with
 # that long-lived (self-signed) certificate, so its identity, and with it macOS privacy permissions,
 # stays the same across updates. Without them it is ad-hoc signed. Either way it is not notarized: the
-# first, manual install needs right-click → Open, or `xattr -dr com.apple.quarantine "AI Desktop.app"`;
+# first, manual install needs right-click → Open, or `xattr -dr com.apple.quarantine /Applications/JustAIDesktop.app`;
 # updates the app installs itself are not quarantined.
 # ---
 name: build-macos-on-tag
@@ -119,12 +119,14 @@ jobs:
         run: |
           version="${TAG#just-ai-desktop@}"
           dir="target/universal-apple-darwin/release/bundle/macos"
-          zip="just-ai-desktop-$version.zip"
-          ditto -c -k --sequesterRsrc --keepParent "$dir/AI Desktop.app" "$zip"
-          cp "$dir/AI Desktop.app.tar.gz" just-ai-desktop.app.tar.gz
-          url="https://github.com/${{ github.repository }}/releases/download/${TAG/@/%40}/just-ai-desktop.app.tar.gz"
+          # JustAIDesktop.zip is the stable link (releases/latest/download/JustAIDesktop.zip); the versioned one stays with its release.
+          zip="JustAIDesktop-$version.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$dir/JustAIDesktop.app" "$zip"
+          cp "$zip" JustAIDesktop.zip
+          cp "$dir/JustAIDesktop.app.tar.gz" JustAIDesktop.app.tar.gz
+          url="https://github.com/${{ github.repository }}/releases/download/${TAG/@/%40}/JustAIDesktop.app.tar.gz"
           # One universal bundle serves both architectures.
-          jq -n --arg v "$version" --arg sig "$(cat "$dir/AI Desktop.app.tar.gz.sig")" --arg url "$url" \
+          jq -n --arg v "$version" --arg sig "$(cat "$dir/JustAIDesktop.app.tar.gz.sig")" --arg url "$url" \
             --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             '{version: $v, pub_date: $date, platforms: {"darwin-aarch64": {signature: $sig, url: $url}, "darwin-x86_64": {signature: $sig, url: $url}}}' > latest.json
           echo "zip=$zip" >> "$GITHUB_OUTPUT"
@@ -137,7 +139,7 @@ jobs:
         run: |
           # release-on-tag.yml creates the release from the same tag, possibly after this build starts.
           for _ in $(seq 1 30); do gh release view "$TAG" > /dev/null 2>&1 && break; sleep 10; done
-          gh release upload "$TAG" "${{ steps.pkg.outputs.zip }}" just-ai-desktop.app.tar.gz latest.json --clobber
+          gh release upload "$TAG" "${{ steps.pkg.outputs.zip }}" JustAIDesktop.zip JustAIDesktop.app.tar.gz latest.json --clobber
 
       - name: Delete the signing keychain
         if: always() && steps.signing.outputs.keychain != ''

@@ -1,29 +1,29 @@
 <a href="https://github.com/justAnArthur/just-ai-desktop/releases/latest"><img src=".github/banner.svg" alt="Claude Code, every profile: one window for the Claude Code sessions of all your Claude accounts: who is running, what each one changed, how much of each plan is left." width="100%"></a>
 
-# AI Desktop
+# JustAIDesktop
 
-A macOS app for running Claude Code across several Claude accounts. Each profile is a Claude Code config folder (`~/.claude` is `default`, `~/.claude-work` is `work`); AI Desktop lists every profile with its plan and its 5-hour and weekly limits, shows the sessions on disk grouped by profile, and lets you start, read and steer them in one window, with each session's tasks, changed files and git state beside the transcript.
+A macOS app for running Claude Code across several Claude accounts. Each profile is a Claude Code config folder (`~/.claude` is `default`, `~/.claude-work` is `work`); JustAIDesktop lists every profile with its plan and its 5-hour and weekly limits, shows the sessions on disk grouped by profile, and lets you start, read and steer them in one window, with each session's tasks, changed files and git state beside the transcript.
 
 Built on [just-apps](https://github.com/justAnArthur/just-apps) (Tauri + React) and the [`@justanarthur/modo-ui`](https://github.com/justAnArthur/modo/tree/main/ui) design system. It drives the `claude` CLI you already have installed.
 
-**[Download for Mac →](https://github.com/justAnArthur/just-ai-desktop/releases/latest)**
+**[Download for Mac →](https://github.com/justAnArthur/just-ai-desktop/releases/latest/download/JustAIDesktop.zip)**
 
 ## Install
 
-1. Download `just-ai-desktop-x.y.z.zip` from the [latest release](https://github.com/justAnArthur/just-ai-desktop/releases/latest), unzip it and move `AI Desktop.app` to Applications. macOS 13+, Apple silicon or Intel.
+1. Download [`JustAIDesktop.zip`](https://github.com/justAnArthur/just-ai-desktop/releases/latest/download/JustAIDesktop.zip) (or a versioned `JustAIDesktop-x.y.z.zip` from [Releases](../../releases)), unzip it and move `JustAIDesktop.app` to Applications. macOS 13+, Apple silicon or Intel.
 2. The app isn't notarized, so open it the first time with right-click → **Open**, or:
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/AI Desktop.app"
+xattr -dr com.apple.quarantine /Applications/JustAIDesktop.app
 ```
 
 3. Install [Claude Code](https://docs.anthropic.com/en/docs/claude-code) if you haven't (`claude` on your `PATH`); the app tells you when it can't find it.
 
-After that it updates itself: it reads `latest.json` from the newest release, verifies the bundle's signature and installs it. No second right-click → Open.
+After that it updates itself: a little after launch and every six hours, and on demand from **Check for updates** at the bottom of the Profiles view (⌘,), it reads `latest.json` from the newest release. A new version waits in a toast until you choose **Restart to update**; the bundle's signature is verified before it installs. No second right-click → Open.
 
 ## Develop
 
-AI Desktop is `apps/ai-desktop` in the just-apps monorepo and builds only inside a just-apps checkout. From the just-apps root:
+JustAIDesktop is `apps/ai-desktop` in the just-apps monorepo and builds only inside a just-apps checkout. From the just-apps root:
 
 ```bash
 bun install
@@ -56,7 +56,7 @@ Conventional Commits scoped to `just-ai-desktop`, `ai-desktop`, `app`, `ui` or `
 
 The mark is a terminal head whose eyes are the prompt `›` and the cursor `|`. Masters are in [`assets/brand`](assets/brand): `icon.svg` (app icon), `icon-dark.svg`, `logo*.svg`, `wordmark-*.svg`, `lockup-*.svg`. The app icon is generated from `icon-1024.png` with `bun run app icons ai-desktop <png>`.
 
-AI Desktop is an independent project, not made by or affiliated with Anthropic.
+JustAIDesktop is an independent project, not made by or affiliated with Anthropic.
 
 ## License
 

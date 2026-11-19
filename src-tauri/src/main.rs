@@ -34,7 +34,7 @@ fn main() {
             sessions::set_session_title,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building AI Desktop")
+        .expect("error while building JustAIDesktop")
         .run(|app, event| {
             if let RunEvent::Exit = event {
                 app.state::<sessions::Sessions>().kill_all();

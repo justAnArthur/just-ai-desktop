@@ -1,8 +1,8 @@
 {
-  "productName": "AI Desktop",
+  "productName": "JustAIDesktop",
   "identifier": "dev.justanarthur.ai-desktop",
   "window": {
-    "title": "AI Desktop",
+    "title": "JustAIDesktop",
     "width": 1100,
     "height": 720,
     "dragDropEnabled": false,

@@ -7,4 +7,4 @@ import { version } from '../package.json'
 import { mockCommands } from './native/mock'
 import Workspace from './workspace'
 
-createApp({ name: 'AI Desktop', version, routes: { '/': Workspace }, commands: mockCommands, frame: false })
+createApp({ name: 'JustAIDesktop', version, routes: { '/': Workspace }, commands: mockCommands, frame: false })

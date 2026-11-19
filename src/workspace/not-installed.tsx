@@ -10,7 +10,7 @@ export function NotInstalled({ onCheck, className }: { onCheck: () => void; clas
         className={className}
         icon={Terminal}
         title="Claude Code isn't installed"
-        description="AI Desktop runs the claude CLI, and finds none on your PATH. Install it in a terminal, then check again."
+        description="JustAIDesktop runs the claude CLI, and finds none on your PATH. Install it in a terminal, then check again."
         actions={
           <div className="flex w-full flex-col items-center gap-3">
             <Copy value={INSTALL_COMMAND} className="w-full" />
