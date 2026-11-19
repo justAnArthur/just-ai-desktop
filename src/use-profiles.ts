@@ -1,6 +1,7 @@
 import { useHost, useStore } from '@just-apps/app-kit'
 import { useEffect, useState } from 'react'
-import { native, type ProfileInfo } from './native/commands'
+import type { ProfileInfo } from '@just-apps/claude-code'
+import { native } from './native/commands'
 import { toProfile } from './profiles'
 
 export function useProfiles() {

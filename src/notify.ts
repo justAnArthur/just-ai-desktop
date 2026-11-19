@@ -1,4 +1,4 @@
-import type { CanUseTool, Line } from './engine/protocol'
+import type { CanUseTool, Line } from '@just-apps/claude-code'
 import { summarize } from './panes'
 
 const firstLine = (text: string) => text.trim().split('\n')[0].slice(0, 120)

@@ -1,4 +1,4 @@
-import type { Attachment } from './engine/protocol'
+import type { Attachment } from '@just-apps/claude-code'
 
 const IMAGES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 const TEXT_EXTENSIONS = ['.md', '.txt', '.json', '.csv', '.log', '.yaml', '.yml', '.toml', '.xml', '.html', '.css', '.js', '.jsx', '.ts', '.tsx', '.py', '.rs', '.go', '.java', '.kt', '.swift', '.sh', '.sql']

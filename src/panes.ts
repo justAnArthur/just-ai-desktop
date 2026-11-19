@@ -1,5 +1,5 @@
 import type { PaneChange, PaneTask } from '@justanarthur/modo-ui-ai'
-import type { Item, SessionModel, ToolCall } from './engine/session'
+import type { Item, SessionModel, ToolCall } from '@just-apps/claude-code'
 
 const TOUCHING = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash'])
 const SUMMARY_KEYS = ['command', 'file_path', 'notebook_path', 'pattern', 'path', 'url', 'query', 'skill', 'description', 'prompt']

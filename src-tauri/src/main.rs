@@ -1,9 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod git;
-mod profiles;
-mod sessions;
 
+use claude_code::{profiles, sessions};
 use tauri::{Manager, RunEvent};
 
 fn main() {

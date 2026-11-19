@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import type { ReactElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { PermissionUpdate } from '../engine/protocol'
-import { fromTranscript, initialSession, type Pending, reduce, type SessionModel } from '../engine/session'
+import type { PermissionUpdate } from '@just-apps/claude-code'
+import { fromTranscript, initialSession, type Pending, reduce, type SessionModel } from '@just-apps/claude-code'
 import { PendingPrompt, SessionTranscript, WorkItems } from './transcript-view'
 
 const lines = (name: string) =>
-  Bun.file(new URL(`../engine/fixtures/${name}`, import.meta.url)).text().then(t => t.split('\n').filter(Boolean))
+  Bun.file(Bun.fileURLToPath(import.meta.resolve(`@just-apps/claude-code/fixtures/${name}`))).text().then(t => t.split('\n').filter(Boolean))
 
 const replay = (all: string[], until = all.length) => all.slice(0, until).reduce<SessionModel>(reduce, initialSession)
 

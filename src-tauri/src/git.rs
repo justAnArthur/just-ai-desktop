@@ -3,7 +3,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::sessions::shell_path;
+use claude_code::shell_path;
 
 const PATCH_BYTES: usize = 200 * 1024;
 const PATCHED_FILES: usize = 200;

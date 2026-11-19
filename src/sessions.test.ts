@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Session } from '@justanarthur/modo-ui-ai'
-import { initialSession } from './engine/session'
+import { initialSession } from '@just-apps/claude-code'
 import { ago, type Entry, groupSessions, inboxOf, limitsOf, mergeEntries, statusOf } from './sessions'
 
 const HOUR = 3_600_000

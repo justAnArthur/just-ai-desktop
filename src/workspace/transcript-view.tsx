@@ -1,8 +1,8 @@
 import { Button, Code, Diff, Markdown } from '@justanarthur/modo-ui'
 import { AgentPrompt, Transcript } from '@justanarthur/modo-ui-ai'
 import { memo, type ReactNode, useMemo, useState } from 'react'
-import { allow, answer, deny, type PermissionUpdate, setPermissionMode } from '../engine/protocol'
-import type { Item, Pending, SessionModel, TextItem, ToolCall, UserItem } from '../engine/session'
+import { allow, answer, deny, type PermissionUpdate, setPermissionMode } from '@just-apps/claude-code'
+import type { Item, Pending, SessionModel, TextItem, ToolCall, UserItem } from '@just-apps/claude-code'
 import { duration, isAgent, plural, summarize } from '../panes'
 
 const MAX_LINES = 40

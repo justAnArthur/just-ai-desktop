@@ -1,7 +1,7 @@
 import type { Command, Model, PermissionMode as ModeOption, ShortcutGroup } from '@justanarthur/modo-ui-ai'
 import { ACCEPT } from '../attachments'
-import type { PermissionMode } from '../engine/protocol'
-import type { Commands } from '../engine/session'
+import type { PermissionMode } from '@just-apps/claude-code'
+import type { Commands } from '@just-apps/claude-code'
 
 /** The composer's models; `alias` is what `--model` takes. */
 export const MODELS: (Model & { alias?: string })[] = [

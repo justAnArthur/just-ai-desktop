@@ -1,7 +1,7 @@
 import type { InboxItem, Session, SessionGroup, SessionStatus, UsageLimit } from '@justanarthur/modo-ui-ai'
 import { duration } from '@justanarthur/modo-ui-ai/lib/pace'
-import type { RateLimitInfo } from './engine/protocol'
-import type { SessionModel } from './engine/session'
+import type { RateLimitInfo } from '@just-apps/claude-code'
+import type { SessionModel } from '@just-apps/claude-code'
 
 /** A session on disk or started here: where it runs and under which profile. */
 export interface Entry {

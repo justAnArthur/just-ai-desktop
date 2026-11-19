@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { Line } from './engine/protocol'
+import type { Line } from '@just-apps/claude-code'
 import { createNotifier, noticeOf } from './notify'
 
 const ask = (tool_name: string, input: Record<string, unknown>) =>

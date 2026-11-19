@@ -3,7 +3,7 @@ import { AlertDialog } from '@justanarthur/modo-ui'
 import type { PaneId } from '@justanarthur/modo-ui-ai'
 import SidePane from '@justanarthur/modo-ui-ai/blocks/panes/side-pane'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { SessionModel } from '../engine/session'
+import type { SessionModel } from '@just-apps/claude-code'
 import { type GitStatus, native } from '../native/commands'
 import { busy, sameChanges, tasksOf, touches } from '../panes'
 

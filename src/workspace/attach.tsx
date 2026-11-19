@@ -1,5 +1,5 @@
 import { readAttachments } from '../attachments'
-import type { Attachment } from '../engine/protocol'
+import type { Attachment } from '@just-apps/claude-code'
 
 /** Reads the files to send, and says on `onSkipped` which were left out and why; undefined when nothing is left to send. */
 export async function attach(text: string, files: File[], onSkipped: (reasons: string[]) => void): Promise<Attachment[] | undefined> {

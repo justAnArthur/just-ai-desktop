@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
-import { initialSession, reduce, type SessionModel, type ToolCall } from './engine/session'
+import { initialSession, reduce, type SessionModel, type ToolCall } from '@just-apps/claude-code'
 import { sameChanges, tasksOf, touches } from './panes'
 
-const all = await Bun.file(new URL('./engine/fixtures/subagent.jsonl', import.meta.url))
+const all = await Bun.file(Bun.fileURLToPath(import.meta.resolve('@just-apps/claude-code/fixtures/subagent.jsonl')))
   .text()
   .then(t => t.split('\n').filter(Boolean))
 const replay = (until = all.length) => all.slice(0, until).reduce<SessionModel>(reduce, initialSession)

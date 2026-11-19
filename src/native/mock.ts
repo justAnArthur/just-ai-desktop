@@ -1,6 +1,6 @@
 import type { PaneChange } from '@justanarthur/modo-ui-ai'
-import type { GitStatus, ProfileInfo, SessionExit, SessionLine, SessionSummary } from './commands'
-import { SESSION_EXIT, SESSION_LINE } from './commands'
+import { type ProfileInfo, SESSION_EXIT, SESSION_LINE, type SessionExit, type SessionLine, type SessionSummary } from '@just-apps/claude-code'
+import type { GitStatus } from './commands'
 import stream from './fixtures/stream.jsonl?raw'
 
 interface Context {
