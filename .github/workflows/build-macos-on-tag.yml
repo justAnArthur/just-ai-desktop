@@ -62,9 +62,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # just-apps lists every app as a workspace; only this one is checked out here (the others are empty submodule dirs).
+      # just-apps lists every app as a bun workspace and Cargo member; only this one is checked out here
+      # (the others are empty submodule dirs), and both tools fail on a workspace that isn't there.
       - name: Keep the workspaces this checkout has
-        run: bun -e 'const fs = require("fs"); const p = await Bun.file("package.json").json(); p.workspaces = p.workspaces.filter(w => w.includes("*") || fs.existsSync(`${w}/package.json`)); await Bun.write("package.json", JSON.stringify(p, null, 2))'
+        run: |
+          bun -e 'const fs = require("fs"); const p = await Bun.file("package.json").json(); p.workspaces = p.workspaces.filter(w => w.includes("*") || fs.existsSync(`${w}/package.json`)); await Bun.write("package.json", JSON.stringify(p, null, 2))'
+          bun -e 'const fs = require("fs"); const t = fs.readFileSync("Cargo.toml", "utf8"); fs.writeFileSync("Cargo.toml", t.replace(/members = \[(.*?)\]/s, (_, list) => `members = [${[...list.matchAll(/"([^"]+)"/g)].map(m => m[1]).filter(g => [...new Bun.Glob(`${g}/Cargo.toml`).scanSync(".")].length > 0).map(g => JSON.stringify(g)).join(", ")}]`))'
 
       - run: bun install
 
