@@ -152,7 +152,6 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange }
           project={entry.cwd}
           branches={entry.gitBranch ? [entry.gitBranch] : []}
           branch={entry.gitBranch}
-          targetOptions={{ worktree: false, baseBranch: false, setupScript: false }}
           profiles={[profile]}
           profile={profile.id}
           context={model.context?.window ? model.context.tokens / model.context.window : 0}

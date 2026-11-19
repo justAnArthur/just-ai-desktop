@@ -262,7 +262,8 @@ export function SessionTranscript({ model, footer }: { model: SessionModel; foot
   // Blocks are cut at fixed indexes, so "Show earlier" fills the first and keeps the rest.
   const blocks: number[] = []
   for (let i = start; i < groups.length; i = (Math.floor(i / BLOCK) + 1) * BLOCK) blocks.push(i)
-  const tasks = model.todos.length > 0 && <Transcript.TaskList items={model.todos} />
+  // Only while the session works: a stopped session's list would keep turning its in-progress spinner.
+  const tasks = busy && model.todos.length > 0 && <Transcript.TaskList items={model.todos} />
   const last = groups.at(-1)?.[0]
   return (
     <Transcript className="select-text" footer={tasks || footer ? <>{tasks}{footer}</> : undefined}>
@@ -341,7 +342,8 @@ export function PendingPrompt({ pending, respond }: { pending: Pending; respond:
       command={summarize(input) || clip(JSON.stringify(input, null, 2))}
       detail={change && <Diff lineNumbers={false} patch={change.patch} />}
       rule={ruleOf(suggestions)}
-      hint={pending.description ?? null}
+      // The CLI describes an edit by its file name, which the path line already shows.
+      hint={change ? null : (pending.description ?? null)}
       onAnswer={decision => {
         if (decision === 'deny') return respond(deny(requestId, 'Denied by the user.'))
         if (decision === 'once') return respond(allow(requestId))

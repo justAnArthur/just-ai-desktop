@@ -47,7 +47,10 @@ describe('SessionTranscript', () => {
     const model = fromTranscript(await lines('transcript.jsonl'))
     const markup = html(model)
     const out = text(markup)
-    for (const text of ['List the files and plan the work', 'Here is a screenshot', '3 tool calls', 'Read README', 'Write plan']) expect(out).toContain(text)
+    for (const text of ['List the files and plan the work', 'Here is a screenshot', '3 tool calls']) expect(out).toContain(text)
+    // A finished session's task list would keep spinning its in-progress row: it shows only while the session works.
+    expect(out).not.toContain('Write plan')
+    expect(text(html({ ...model, status: 'running' }))).toContain('Write plan')
     expect(markup).toContain('aria-label="View Image 1"')
     for (const text of ['Bash', 'missing.md', 'error']) expect(work(model)).toContain(text)
   })

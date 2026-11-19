@@ -20,17 +20,23 @@ export const MODES: (ModeOption & { value: PermissionMode })[] = [
   { label: 'Bypass permissions', note: 'Never asks; for sandboxes only', icon: 'triangle-alert', value: 'bypassPermissions' },
 ]
 
-// Output style and fast mode have no flag here: the kit's composer can't hide them, so style offers one choice and fast stays off.
+// Sessions run in place (no worktrees) and take no fast mode or output style, so the composer leaves those controls out
+// (`fastMode` and a lone style from the modo-ui-ai release after 0.6.0; until then fast stays pinned off). A composer
+// mounts per session: `autoFocus` puts the caret in it as a session opens and as the first message starts one.
 export const COMPOSER = {
   models: MODELS,
   efforts: EFFORTS,
   permissionModes: MODES,
   outputStyles: ['Default'],
+  fastMode: false,
+  fast: false,
+  onFastChange: () => {},
   files: [],
   accept: ACCEPT,
   maxFiles: 10,
-  fast: false,
-  onFastChange: () => {},
+  defaultWorktree: false,
+  targetOptions: { worktree: false, baseBranch: false, setupScript: false },
+  textareaProps: { autoFocus: true },
 }
 
 /** The composer's commands from a session's `system/init`: skills apart from the other slash commands. */
@@ -81,6 +87,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
     label: 'Window',
     shortcuts: [
       { label: 'Fold the sessions sidebar', keys: ['['] },
+      { label: 'Fold the side pane', keys: [']'] },
       { label: 'Keyboard shortcuts', keys: ['⌘/'] },
     ],
   },

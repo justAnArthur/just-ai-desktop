@@ -1,4 +1,4 @@
-import { Input, Select } from '@justanarthur/modo-ui'
+import { Input } from '@justanarthur/modo-ui'
 import type { Profile, Project } from '@justanarthur/modo-ui-ai'
 import Composer from '@justanarthur/modo-ui-ai/blocks/conversation/composer'
 import { useState } from 'react'
@@ -32,22 +32,11 @@ export function NewSession({ projects, profiles, commands, target, onTargetChang
   if (!profileId) return null
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 overflow-auto px-6 pb-8 pt-16">
-      <h1 className="m-0 text-display text-foreground">What should we work on?</h1>
-      <div className="flex items-center gap-2">
-        <span className="shrink-0 text-caption text-muted-foreground">Project</span>
-        {projects.length > 0 ? (
-          <Select value={cwd} onValueChange={path => onTargetChange({ ...target, cwd: String(path) })}>
-            <Select.Trigger variant="borderless" className="min-w-0" />
-            <Select.Content>
-              {projects.map((p, i) => (
-                <Select.Item key={p.path} index={i} value={p.path}>
-                  {p.label}
-                </Select.Item>
-              ))}
-            </Select.Content>
-          </Select>
-        ) : (
+    // Centred in the card, the composer's own project picker below: a path field only until there is a project to pick.
+    <main className="flex min-h-0 flex-1 overflow-auto">
+      <div className="m-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-8">
+        <h1 className="m-0 text-display text-foreground">What should we work on?</h1>
+        {projects.length === 0 && (
           <Input
             aria-label="Project folder"
             placeholder="/path/to/project"
@@ -55,30 +44,28 @@ export function NewSession({ projects, profiles, commands, target, onTargetChang
             onValueChange={path => onTargetChange({ ...target, cwd: path })}
           />
         )}
-        <span className="min-w-0 truncate font-mono text-caption text-muted-foreground">{cwd}</span>
+        <Skipped reasons={skipped} />
+        <Composer
+          {...COMPOSER}
+          commands={commandsOf(commands[profileId])}
+          {...runProps(run, patch => setRun({ ...run, ...patch }))}
+          target
+          projects={projects.length > 0 ? projects : cwd ? [{ label: basename(cwd), path: cwd }] : []}
+          project={cwd}
+          onProjectChange={path => onTargetChange({ ...target, cwd: path })}
+          branches={[]}
+          profiles={profiles}
+          profile={profileId}
+          onProfileChange={id => onTargetChange({ ...target, profileId: id })}
+          placeholder="Describe the task, or type / for commands"
+          context={0}
+          onSend={async (text, files) => {
+            if (!cwd) return
+            const attachments = await attach(text, files, setSkipped)
+            if (attachments) onStart({ cwd, profileId, text, attachments, run })
+          }}
+        />
       </div>
-      <Skipped reasons={skipped} />
-      <Composer
-        {...COMPOSER}
-        commands={commandsOf(commands[profileId])}
-        {...runProps(run, patch => setRun({ ...run, ...patch }))}
-        target
-        projects={projects.length > 0 ? projects : cwd ? [{ label: basename(cwd), path: cwd }] : []}
-        project={cwd}
-        onProjectChange={path => onTargetChange({ ...target, cwd: path })}
-        branches={[]}
-        defaultWorktree={false}
-        profiles={profiles}
-        profile={profileId}
-        onProfileChange={id => onTargetChange({ ...target, profileId: id })}
-        placeholder="Describe the task, or type / for commands"
-        context={0}
-        onSend={async (text, files) => {
-          if (!cwd) return
-          const attachments = await attach(text, files, setSkipped)
-          if (attachments) onStart({ cwd, profileId, text, attachments, run })
-        }}
-      />
     </main>
   )
 }
