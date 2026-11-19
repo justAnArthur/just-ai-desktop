@@ -369,6 +369,10 @@ export const mockCommands = {
     endLogin(configDir, null, emit)
   },
 
+  desktop_archived_sessions() {
+    return []
+  },
+
   auth_usage({ configDir }: { configDir: string }) {
     claude()
     if (!profileAt(configDir)?.signedIn) return 'Total cost: $0.0000'

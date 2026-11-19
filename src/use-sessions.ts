@@ -80,7 +80,10 @@ export function useSessions() {
   const [usage, setUsage] = useState<Record<string, Windows>>({})
   const [titles, setTitles] = useStore<Record<string, string>>('sessions.titles', {})
   const [pinned, setPinned] = useStore<string[]>('sessions.pinned', [])
-  const [archived, setArchived] = useStore<string[]>('sessions.archived', [])
+  const [storedArchived, setArchived] = useStore<string[]>('sessions.archived', [])
+  // Archived in the Claude desktop app shows archived here too, unless the user took it out here (`restored`) or pinned it.
+  const [desktopArchived, setDesktopArchived] = useState<string[]>([])
+  const [restored, setRestored] = useStore<string[]>('sessions.restored', [])
   const [sections] = useStore<Section[]>('sessions.sections', [])
   const [unread, setUnread] = useStore<string[]>('sessions.unread', [])
   const [selected, setSelected] = useStore<string>('sessions.selected', NEW)
@@ -100,6 +103,11 @@ export function useSessions() {
       wanted: id => !focused.current || id !== selectedRef.current,
       send: (id, body) => void host.notifications.send({ title: titleRef.current(id), body }).catch(error => console.error('[sessions] notify:', error)),
     }),
+  )
+
+  const archived = useMemo(
+    () => [...new Set([...storedArchived, ...desktopArchived.filter(id => !restored.includes(id) && !pinned.includes(id))])],
+    [storedArchived, desktopArchived, restored, pinned],
   )
 
   const profileKey = profiles.map(p => `${p.id}=${p.configDir}`).join()
@@ -172,6 +180,15 @@ export function useSessions() {
     read(0)
     return host.window.onFocusChange(focused => focused && read(USAGE_STALE))
   }, [call, host, signedInKey])
+
+  useEffect(() => {
+    const read = () =>
+      call('desktop_archived_sessions')
+        .then(ids => setDesktopArchived(old => (old.length === ids.length && old.every((id, i) => id === ids[i]) ? old : ids)))
+        .catch(error => console.error('[sessions] desktop archive:', error))
+    read()
+    return host.window.onFocusChange(focused => focused && read())
+  }, [call, host])
 
   useEffect(() => {
     call('session_running').then(ids => {
@@ -377,12 +394,15 @@ export function useSessions() {
   // Pinned and archived exclude each other: a session shows in one list.
   function pin(id: string, on: boolean) {
     setPinned(setIn(pinned, id, on))
-    if (on && archived.includes(id)) setArchived(without(archived, id))
+    if (on && archived.includes(id)) archive(id, false)
   }
 
   function archive(id: string, on: boolean) {
-    setArchived(setIn(archived, id, on))
-    if (on && pinned.includes(id)) setPinned(without(pinned, id))
+    setArchived(setIn(storedArchived, id, on))
+    if (on) {
+      if (restored.includes(id)) setRestored(without(restored, id))
+      if (pinned.includes(id)) setPinned(without(pinned, id))
+    } else if (desktopArchived.includes(id) && !restored.includes(id)) setRestored([...restored, id])
   }
 
   // The stored title shows at once; the transcript's `custom-title` carries it to the CLI and the next listing.

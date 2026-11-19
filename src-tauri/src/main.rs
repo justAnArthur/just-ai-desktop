@@ -2,7 +2,7 @@
 
 mod git;
 
-use claude_code::{auth, profiles, sessions};
+use claude_code::{auth, desktop, profiles, sessions};
 use tauri::{Manager, RunEvent};
 
 fn main() {
@@ -25,6 +25,7 @@ fn main() {
             auth::auth_cancel,
             auth::auth_logout,
             auth::auth_usage,
+            desktop::desktop_archived_sessions,
             sessions::session_start,
             sessions::session_write,
             sessions::session_kill,
