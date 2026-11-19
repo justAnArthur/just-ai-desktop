@@ -57,3 +57,7 @@ Conventional Commits scoped to `just-ai-desktop`, `ai-desktop`, `app`, `ui` or `
 The mark is a terminal head whose eyes are the prompt `›` and the cursor `|`. Masters are in [`assets/brand`](assets/brand): `icon.svg` (app icon), `icon-dark.svg`, `logo*.svg`, `wordmark-*.svg`, `lockup-*.svg`. The app icon is generated from `icon-1024.png` with `bun run app icons ai-desktop <png>`.
 
 AI Desktop is an independent project, not made by or affiliated with Anthropic.
+
+## License
+
+[FSL-1.1-MIT](LICENSE.md): source available, free to use, modify and run for anything except a competing product. Each version becomes MIT two years after its release.

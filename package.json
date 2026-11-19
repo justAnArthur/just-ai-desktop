@@ -2,6 +2,7 @@
   "name": "just-ai-desktop",
   "version": "0.6.0",
   "private": true,
+  "license": "FSL-1.1-MIT",
   "properties": {
     "gitCommitScopeRelatedNames": "just-ai-desktop,ai-desktop,app,ui,native"
   },
