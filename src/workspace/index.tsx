@@ -1,5 +1,5 @@
 import { useCommand, useHost, useStore } from '@just-apps/app-kit'
-import { Button, DesktopShell, DropdownContent, DropdownMenu, DropdownTrigger, Input, MenuItem } from '@justanarthur/modo-ui'
+import { Button, DesktopShell, DropdownContent, DropdownMenu, DropdownTrigger, Input, MenuItem, Toast, toast } from '@justanarthur/modo-ui'
 import type { Command, InboxAction, InboxItem, PaletteItem, Profile, Project, Session, SessionGroup } from '@justanarthur/modo-ui-ai'
 import Composer from '@justanarthur/modo-ui-ai/blocks/conversation/composer'
 import FailureState, { type FailureKind } from '@justanarthur/modo-ui-ai/blocks/conversation/failure-states'
@@ -14,6 +14,7 @@ import { initialSession, type SessionModel } from '@just-apps/claude-code'
 import type { Attached } from '../attachments'
 import { ago, basename, type Entry, groupSessions, inboxOf, statusOf } from '../sessions'
 import { type Exit, NEW, type Sessions, useSessions } from '../use-sessions'
+import { useUpdate } from '../use-update'
 import { attach, Skipped } from './attach'
 import { NewSession, type Target } from './new-session'
 import { NotInstalled } from './not-installed'
@@ -240,6 +241,7 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, 
 export default function Workspace() {
   const host = useHost()
   const sessions = useSessions()
+  useUpdate()
   const { profiles, entries, models, selected, select } = sessions
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
@@ -364,6 +366,7 @@ export default function Workspace() {
   }
 
   return (
+    <>
     <DesktopShell
       titleBar="card"
       platform={host.kind === 'tauri' && host.os.platform === 'macos' ? 'mac' : 'linux'}
@@ -482,5 +485,7 @@ export default function Workspace() {
         )
       }
     />
+    <Toast manager={toast} position="bottom-right" />
+    </>
   )
 }
