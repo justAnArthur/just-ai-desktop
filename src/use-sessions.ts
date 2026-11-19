@@ -63,8 +63,18 @@ const RELIST_DELAY = 1000
 /** A live process this long without a turn is stopped; the next message resumes it. */
 const IDLE_STOP = 10 * 60_000
 
-/** How old a profile's `/usage` reading may get before a focus reads it again. */
-const USAGE_STALE = 5 * 60_000
+/** How soon after the last refresh a focus refreshes the session lists again: switching windows often re-reads nothing. */
+const FOCUS_STALE = 30_000
+
+/** Calls `f` on focus at most every `stale` ms. */
+function onFocusEvery(host: { window: { onFocusChange(f: (focused: boolean) => void): () => void } }, stale: number, f: () => void) {
+  let last = Date.now()
+  return host.window.onFocusChange(focused => {
+    if (!focused || Date.now() - last < stale) return
+    last = Date.now()
+    f()
+  })
+}
 
 export function useSessions() {
   const host = useHost()
@@ -158,27 +168,33 @@ export function useSessions() {
     }
   }, [host, profileKey])
 
-  // A signed-in profile's limits from `/usage`, at once rather than after its first turn; again on focus, at most every few minutes.
-  const usageRead = useRef(new Map<string, number>())
+  // A signed-in profile's limits from `/usage` when there is no current reading: after a sign-in, or a launch whose
+  // stored windows have all reset. Not on a schedule: `/usage` also scans every local transcript (seconds of CPU,
+  // half a GB), and a session's own `rate_limit_event` keeps the reading current for free. One profile at a time.
+  const usageRead = useRef(new Set<string>())
   const signedInKey = profiles.filter(p => signedIn.includes(p.id)).map(p => `${p.id}=${p.configDir}`).join()
   useEffect(() => {
-    const targets = profiles.filter(p => signedIn.includes(p.id) && p.provider === 'anthropic')
-    const read = (stale: number) => {
+    const targets = profiles.filter(p => signedIn.includes(p.id) && p.provider === 'anthropic' && !usageRead.current.has(p.id))
+    let live = true
+    void (async () => {
       for (const { id, configDir } of targets) {
-        if (Date.now() - (usageRead.current.get(id) ?? 0) < stale) continue
-        usageRead.current.set(id, Date.now())
-        call('auth_usage', { configDir })
-          .then(text => {
-            const windows = parseUsage(text)
-            if (Object.keys(windows).length === 0) return
-            setUsage(all => ({ ...all, [id]: windows }))
-            void host.store.set(`usage.${id}`, windows)
-          })
-          .catch(error => console.error(`[sessions] usage of ${configDir}:`, error))
+        const stored = await host.store.get<Windows>(`usage.${id}`)
+        if (!live) return
+        if (stored && limitsOf(stored).length > 0) continue
+        usageRead.current.add(id)
+        try {
+          const windows = parseUsage(await call('auth_usage', { configDir }))
+          if (Object.keys(windows).length === 0) continue
+          setUsage(all => ({ ...all, [id]: windows }))
+          void host.store.set(`usage.${id}`, windows)
+        } catch (error) {
+          console.error(`[sessions] usage of ${configDir}:`, error)
+        }
       }
+    })()
+    return () => {
+      live = false
     }
-    read(0)
-    return host.window.onFocusChange(focused => focused && read(USAGE_STALE))
   }, [call, host, signedInKey])
 
   useEffect(() => {
@@ -187,7 +203,7 @@ export function useSessions() {
         .then(ids => setDesktopArchived(old => (old.length === ids.length && old.every((id, i) => id === ids[i]) ? old : ids)))
         .catch(error => console.error('[sessions] desktop archive:', error))
     read()
-    return host.window.onFocusChange(focused => focused && read())
+    return onFocusEvery(host, FOCUS_STALE, read)
   }, [call, host])
 
   useEffect(() => {
@@ -198,7 +214,7 @@ export function useSessions() {
   }, [call])
 
   useEffect(() => {
-    if (!loading) return host.window.onFocusChange(focused => focused && relist(profiles))
+    if (!loading) return onFocusEvery(host, FOCUS_STALE, () => relist(profiles))
   }, [host, loading, profileKey])
 
   useEffect(

@@ -10,6 +10,7 @@ fn main() {
         .manage(sessions::Sessions::default())
         .manage(sessions::Summaries::default())
         .manage(auth::Logins::default())
+        .manage(desktop::DesktopArchive::default())
         .invoke_handler(tauri::generate_handler![
             git::git_status,
             git::git_stage,
