@@ -1,5 +1,6 @@
 import type { PaneChange } from '@justanarthur/modo-ui-ai'
-import { type ProfileInfo, SESSION_EXIT, SESSION_LINE, type SessionExit, type SessionLine, type SessionSummary } from '@just-apps/claude-code'
+import { AUTH_EXIT, AUTH_LINE, type AuthExit, type AuthLine, type AuthStatus, type ProfileInfo } from '@just-apps/claude-code'
+import { SESSION_EXIT, SESSION_LINE, type SessionExit, type SessionLine, type SessionSummary } from '@just-apps/claude-code'
 import type { GitStatus } from './commands'
 import image from './fixtures/image.png.b64?raw'
 import stream from './fixtures/stream.jsonl?raw'
@@ -8,7 +9,7 @@ interface Context {
   emit(event: string, payload: unknown): void
 }
 
-const profiles: ProfileInfo[] = [
+let profiles: ProfileInfo[] = [
   {
     configDir: '~/.claude',
     signedIn: true,
@@ -29,6 +30,7 @@ const profiles: ProfileInfo[] = [
     defaultModel: 'opus',
   },
   { configDir: '~/.claude-local', signedIn: false, baseUrl: 'http://localhost:4000' },
+  { configDir: '~/.claude-personal', signedIn: false },
 ]
 
 const lines = stream.trim().split('\n')
@@ -132,8 +134,14 @@ function compacted(sessionId: string) {
   ].map(entry => JSON.stringify(entry))
 }
 
+const mode = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('mock')
 // `?mock=heavy`: the load of real use — 4 profiles × 200 sessions over 30 projects, and long transcripts.
-const heavy = typeof location !== 'undefined' && new URLSearchParams(location.search).get('mock') === 'heavy'
+const heavy = mode === 'heavy'
+// `?mock=not-installed`: no `claude` on PATH.
+const NOT_FOUND = 'claude not found on PATH'
+const claude = () => {
+  if (mode === 'not-installed') throw new Error(NOT_FOUND)
+}
 
 const heavyProfiles: ProfileInfo[] = ['~/.claude', '~/.claude-a', '~/.claude-b', '~/.claude-c'].map((configDir, i) => ({
   configDir,
@@ -301,13 +309,81 @@ function stop(key: string) {
   return run
 }
 
+/** The sign-ins running, by config dir: each waits for its pasted code. */
+const logins = new Map<string, { timers: ReturnType<typeof setTimeout>[] }>()
+const SIGN_IN_URL = 'https://claude.com/cai/oauth/authorize?code=true&client_id=mock&state=mock'
+
+const profileAt = (configDir: string) => profiles.find(p => p.configDir === configDir)
+
+function endLogin(configDir: string, code: number | null, emit: Context['emit']) {
+  logins.get(configDir)?.timers.forEach(clearTimeout)
+  logins.delete(configDir)
+  emit(AUTH_EXIT, { configDir, code } satisfies AuthExit)
+}
+
 export const mockCommands = {
   list_profiles: ({ extra = [] }: { extra?: string[] } = {}) => [
     ...(heavy ? heavyProfiles : profiles),
-    ...extra.map(configDir => ({ configDir, signedIn: false })),
+    ...extra.filter(dir => !profileAt(dir)).map(configDir => ({ configDir, signedIn: false })),
   ],
 
+  create_profile_dir({ configDir }: { configDir: string }) {
+    if (!configDir.startsWith('~/') && !configDir.startsWith('/')) throw new Error(`not a full path: ${configDir}`)
+    return configDir.replace(/\/+$/, '').replace(/^~/, '/Users/you')
+  },
+
+  auth_status({ configDir }: { configDir: string }): AuthStatus {
+    claude()
+    const p = profileAt(configDir)
+    if (!p?.signedIn) return { loggedIn: false, authMethod: 'none' }
+    return { loggedIn: true, authMethod: 'claude.ai', email: p.email, orgName: p.organizationName, subscriptionType: p.organizationType?.replace('claude_', '') }
+  },
+
+  auth_login({ configDir }: { configDir: string; method?: string; email?: string }, { emit }: Context) {
+    claude()
+    if (logins.has(configDir)) throw new Error(`a sign-in for ${configDir} is already running`)
+    const send = (line: string, stream: AuthLine['stream'] = 'stdout') => emit(AUTH_LINE, { configDir, line, stream } satisfies AuthLine)
+    const timers = [
+      setTimeout(() => send('Opening browser to sign in…'), 200),
+      setTimeout(() => send(`If the browser didn't open, visit: ${SIGN_IN_URL}`), 400),
+    ]
+    logins.set(configDir, { timers })
+  },
+
+  auth_write({ configDir, line }: { configDir: string; line: string }, { emit }: Context) {
+    if (!logins.has(configDir)) throw new Error('no sign-in is running')
+    const send = (text: string, stream: AuthLine['stream']) => emit(AUTH_LINE, { configDir, line: text, stream } satisfies AuthLine)
+    if (!line.includes('#')) return send('Invalid code. Please make sure the full code was copied.', 'stderr')
+    if (line.startsWith('bad')) {
+      send('Login failed: Request failed with status code 400', 'stderr')
+      return endLogin(configDir, 1, emit)
+    }
+    const account = { configDir, signedIn: true, email: 'ada@new.example.com', displayName: 'Ada', organizationName: 'New', organizationType: 'claude_pro' }
+    profiles = profileAt(configDir) ? profiles.map(p => (p.configDir === configDir ? { ...p, ...account } : p)) : [...profiles, account]
+    send('Paste code here if prompted > Login successful.', 'stdout')
+    endLogin(configDir, 0, emit)
+  },
+
+  auth_cancel({ configDir }: { configDir: string }, { emit }: Context) {
+    if (!logins.has(configDir)) throw new Error('no sign-in is running')
+    endLogin(configDir, null, emit)
+  },
+
+  auth_logout({ configDir }: { configDir: string }) {
+    claude()
+    profiles = profiles.map(p => (p.configDir === configDir ? { configDir: p.configDir, signedIn: false, defaultModel: p.defaultModel } : p))
+  },
+
+  set_session_title({ sessionId, title }: { configDir: string; sessionId: string; title: string }) {
+    const session = sessions.find(s => s.id === sessionId)
+    if (!session) throw new Error(`no transcript for session ${sessionId}`)
+    // An e2e test reads the titles written by defining this array first.
+    ;(globalThis as { titleWrites?: { sessionId: string; title: string }[] }).titleWrites?.push({ sessionId, title })
+    session.title = title
+  },
+
   session_start({ key, args }: { key: string; args: string[] }, { emit }: Context) {
+    claude()
     if (live.has(key)) throw new Error(`session ${key} is already running`)
     const bypass = args.includes('--allow-dangerously-skip-permissions') || args.includes('--dangerously-skip-permissions')
     const at = args.indexOf('--permission-mode')

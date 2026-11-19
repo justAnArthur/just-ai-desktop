@@ -1,6 +1,7 @@
 import { Input } from '@justanarthur/modo-ui'
 import type { Profile, Project } from '@justanarthur/modo-ui-ai'
 import Composer from '@justanarthur/modo-ui-ai/blocks/conversation/composer'
+import FailureState from '@justanarthur/modo-ui-ai/blocks/conversation/failure-states'
 import { useState } from 'react'
 import type { Attached } from '../attachments'
 import type { Commands } from '@just-apps/claude-code'
@@ -19,17 +20,23 @@ interface NewSessionProps {
   /** Per profile, the commands its last session listed. */
   commands: Record<string, Commands>
   target: Target
+  /** Profiles with no account: picked, they offer a sign-in instead of starting. */
+  signedOut: string[]
+  onSignIn: (profile: Profile) => void
   onTargetChange: (target: Target) => void
   onStart: (options: { cwd: string; profileId: string; text: string; attachments: Attached[]; run: Run }) => void
 }
 
-export function NewSession({ projects, profiles, commands, target, onTargetChange, onStart }: NewSessionProps) {
+export function NewSession({ projects, profiles, commands, target, signedOut, onSignIn, onTargetChange, onStart }: NewSessionProps) {
   const [run, setRun] = useState(DEFAULT_RUN)
   const [skipped, setSkipped] = useState<string[]>([])
+  const [draft, setDraft] = useState('')
   // As the composer resolves them: a pick its list doesn't hold stands for the first entry.
   const cwd = projects.length && !projects.some(p => p.path === target.cwd) ? projects[0].path : (target.cwd ?? '')
   const profileId = profiles.some(p => p.id === target.profileId) ? target.profileId : profiles[0]?.id
-  if (!profileId) return null
+  const profile = profiles.find(p => p.id === profileId)
+  if (!profile) return null
+  const blocked = signedOut.includes(profile.id)
 
   return (
     // Centred in the card, the composer's own project picker below: a path field only until there is a project to pick.
@@ -45,9 +52,10 @@ export function NewSession({ projects, profiles, commands, target, onTargetChang
           />
         )}
         <Skipped reasons={skipped} />
+        {blocked && <FailureState kind="auth-expired" profile={profile} onLogin={() => onSignIn(profile)} />}
         <Composer
           {...COMPOSER}
-          commands={commandsOf(commands[profileId])}
+          commands={commandsOf(commands[profile.id])}
           {...runProps(run, patch => setRun({ ...run, ...patch }))}
           target
           projects={projects.length > 0 ? projects : cwd ? [{ label: basename(cwd), path: cwd }] : []}
@@ -55,14 +63,19 @@ export function NewSession({ projects, profiles, commands, target, onTargetChang
           onProjectChange={path => onTargetChange({ ...target, cwd: path })}
           branches={[]}
           profiles={profiles}
-          profile={profileId}
+          profile={profile.id}
           onProfileChange={id => onTargetChange({ ...target, profileId: id })}
           placeholder="Describe the task, or type / for commands"
+          // Held here: a send a signed-out profile turns into a sign-in keeps the text for after it.
+          value={draft}
+          onValueChange={setDraft}
           context={0}
           onSend={async (text, files) => {
             if (!cwd) return
+            if (blocked) return onSignIn(profile)
+            setDraft('')
             const attachments = await attach(text, files, setSkipped)
-            if (attachments) onStart({ cwd, profileId, text, attachments, run })
+            if (attachments) onStart({ cwd, profileId: profile.id, text, attachments, run })
           }}
         />
       </div>

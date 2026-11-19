@@ -66,7 +66,8 @@ const IDLE_STOP = 10 * 60_000
 export function useSessions() {
   const host = useHost()
   const call = useMemo(() => native(host), [host])
-  const { profiles, defaultId, loading } = useProfiles()
+  const profileState = useProfiles()
+  const { profiles, defaultId, loading } = profileState
   // Per profile: one re-reads its sessions without touching the others' lists.
   const [lists, setLists] = useState<Record<string, Entry[]>>({})
   const [started, setStarted] = useState<Entry[]>([])
@@ -357,7 +358,18 @@ export function useSessions() {
     if (on && pinned.includes(id)) setPinned(without(pinned, id))
   }
 
+  // The stored title shows at once; the transcript's `custom-title` carries it to the CLI and the next listing.
+  function rename(id: string, title: string) {
+    setTitles({ ...titles, [id]: title })
+    const entry = entryOf(id)
+    if (entry)
+      call('set_session_title', { configDir: entry.configDir, sessionId: id, title }).catch(error =>
+        console.error(`[sessions] title of ${id}:`, error),
+      )
+  }
+
   return {
+    profileState,
     profiles: profiles.map(p => ({
       ...p,
       limits: limitsOf(usage[p.id]),
@@ -384,7 +396,7 @@ export function useSessions() {
     kill,
     restart,
     dismiss,
-    rename: (id: string, title: string) => setTitles({ ...titles, [id]: title }),
+    rename,
     pin,
     archive,
     markUnread: (id: string) => {

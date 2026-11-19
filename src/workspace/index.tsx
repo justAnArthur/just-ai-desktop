@@ -9,15 +9,18 @@ import SessionSidebar from '@justanarthur/modo-ui-ai/blocks/sessions/session-sid
 import { useIcon } from '@justanarthur/modo-ui-ai/lib/icons'
 import { duration } from '@justanarthur/modo-ui-ai/lib/pace'
 import { memo, useEffect, useRef, useState } from 'react'
-import { allow, deny, setModel, setPermissionMode } from '@just-apps/claude-code'
+import { allow, deny, notInstalled, setModel, setPermissionMode } from '@just-apps/claude-code'
 import { initialSession, type SessionModel } from '@just-apps/claude-code'
 import type { Attached } from '../attachments'
 import { ago, basename, type Entry, groupSessions, inboxOf, statusOf } from '../sessions'
 import { type Exit, NEW, type Sessions, useSessions } from '../use-sessions'
 import { attach, Skipped } from './attach'
 import { NewSession, type Target } from './new-session'
+import { NotInstalled } from './not-installed'
 import { COMPOSER, commandsOf, DEFAULT_RUN, flagsOf, modelAlias, modelName, modeLabel, modeValue, type Run, runProps, SHORTCUTS } from './options'
+import { ProfilesView } from './profiles-view'
 import { PANE_TABS, type PaneTab, SessionPane } from './side-pane'
+import { SignInDialog, type SignInTarget } from './sign-in'
 import { PendingPrompt, SessionTranscript } from './transcript-view'
 
 /** Rows a sidebar group lists before its Show more. */
@@ -101,20 +104,22 @@ interface SessionViewProps {
   exit?: Exit
   run: Run
   onRunChange: (patch: Partial<Run>) => void
+  onSignIn: (profile: Profile, onSignedIn: () => void) => void
 }
 
-function SessionView({ sessions, entry, profile, model, exit, run, onRunChange }: SessionViewProps) {
+function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, onSignIn }: SessionViewProps) {
   const { id } = entry
-  const [loginNote, setLoginNote] = useState(false)
   const [skipped, setSkipped] = useState<string[]>([])
   const busy = sessions.running.includes(id) && (model.status === 'running' || model.status === 'waiting')
-  const kind = model.status === 'failed' ? failureOf(model) : undefined
+  const missing = model.status === 'failed' && notInstalled(model.error)
+  const kind = model.status === 'failed' && !missing ? failureOf(model) : undefined
   const resetsAt = model.rateLimit?.resetsAt
   const pending = model.pending[0]
   const stderr = (exit?.stderr || model.error || '').split('\n').filter(Boolean)
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {missing && <NotInstalled className="mx-auto max-w-lg" onCheck={() => sessions.dismiss(id)} />}
       {kind && (
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pt-3">
           <FailureState
@@ -124,14 +129,9 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange }
             exitCode={exit ? (exit.code ?? 'signal') : undefined}
             resetsIn={resetsAt ? `in ${duration(Math.max(resetsAt * 1000 - Date.now(), 0) / 3_600_000)}` : undefined}
             onRestart={() => sessions.restart(id)}
-            onLogin={() => setLoginNote(true)}
+            onLogin={() => onSignIn(profile, () => sessions.dismiss(id))}
             onDismiss={() => sessions.dismiss(id)}
           />
-          {kind === 'auth-expired' && loginNote && (
-            <p className="m-0 text-caption text-muted-foreground">
-              Run <code>CLAUDE_CONFIG_DIR={profile.configDir} claude /login</code> in a terminal, then send again.
-            </p>
-          )}
         </div>
       )}
       <SessionTranscript
@@ -186,8 +186,20 @@ export default function Workspace() {
   const Pencil = useIcon('pencil')
   const Keyboard = useIcon('command')
   const Stop = useIcon('square')
+  const [view, setView] = useState<'sessions' | 'profiles'>('sessions')
+  const [signIn, setSignIn] = useState<SignInTarget>()
+  const Back = useIcon('arrow-left')
   useMinuteTick()
-  useCommand({ id: 'session.new', title: 'New session', shortcut: 'Mod+N', run: () => select(NEW) })
+  const show = (id: string) => {
+    setView('sessions')
+    select(id)
+  }
+  // Profiles are the app's settings: ⌘, the menu's Settings… (`app://open-settings`), the sidebar's Settings row, the palette.
+  const openProfiles = () => setView('profiles')
+  useCommand({ id: 'session.new', title: 'New session', shortcut: 'Mod+N', run: () => show(NEW) })
+  useCommand({ id: 'app.settings', title: 'Profiles', shortcut: 'Mod+,', run: openProfiles })
+  useEffect(() => host.on('app://open-settings', openProfiles), [host])
+  const signInTo = (profile: Profile, onSignedIn?: () => void) => setSignIn({ kind: 'sign-in', profile, onSignedIn })
 
   const now = Date.now()
   const entry = entries.find(e => e.id === selected)
@@ -222,12 +234,13 @@ export default function Workspace() {
   const newSession = (next: Target) => {
     setTarget(next)
     setTargetKey(k => k + 1)
-    select(NEW)
+    show(NEW)
   }
 
   const onPick = (item: PaletteItem) => {
-    if (item.kind === 'session') select(item.id)
+    if (item.kind === 'session') show(item.id)
     if (item.kind === 'shortcuts') setShortcutsOpen(true)
+    if (item.kind === 'profiles' || item.kind === 'settings') openProfiles()
     if (item.kind === 'new-session') newSession({ cwd: item.project, profileId: item.profile })
     if (item.kind === 'profile') newSession({ ...target, profileId: item.id })
     if (item.kind === 'pane' && PANE_TABS.includes(item.pane as PaneTab)) {
@@ -238,21 +251,22 @@ export default function Workspace() {
 
   const sidebar = useStable({
     onPinnedOrderChange: sessions.reorderPinned,
-    onValueChange: (id: string) => id !== 'overview' && select(id),
+    onValueChange: (id: string) => id !== 'overview' && show(id),
     onPin: sessions.pin,
     onArchive: sessions.archive,
     onRename: (id: string) => {
-      select(id)
+      show(id)
       setRenaming(id)
     },
     onMarkUnread: sessions.markUnread,
     onNewSessionIn: (group: SessionGroup) => newSession({ ...target, cwd: group.path }),
     onInboxAction: (item: InboxItem, action: InboxAction) => {
-      if (action === 'open') return select(item.sessionId)
+      if (action === 'open') return show(item.sessionId)
       if (action === 'allow') return sessions.respond(item.sessionId, allow(item.id))
       if (action === 'deny') return sessions.respond(item.sessionId, deny(item.id, 'Denied by the user.'))
     },
     onSearch: () => setPaletteOpen(true),
+    onOpenSettings: openProfiles,
   })
 
   const start = ({ run, ...options }: { cwd: string; profileId: string; text: string; attachments: Attached[]; run: Run }) => {
@@ -283,10 +297,17 @@ export default function Workspace() {
       titleBar="card"
       platform={host.kind === 'tauri' && host.os.platform === 'macos' ? 'mac' : 'linux'}
       leftLabel="Sessions sidebar"
-      rightOpen={paneOpen}
+      rightOpen={paneOpen && view === 'sessions'}
       onRightOpenChange={setPaneOpen}
       title={
-        entry && profile && model ? (
+        view === 'profiles' ? (
+          <>
+            <Button variant="ghost" size="icon-compact" aria-label="Back to sessions" onClick={() => setView('sessions')}>
+              <Back />
+            </Button>
+            <span className="text-body weight-medium text-foreground">Profiles</span>
+          </>
+        ) : entry && profile && model ? (
           <>
             <SessionTitle
               key={entry.id}
@@ -306,6 +327,7 @@ export default function Workspace() {
       trailing={
         <>
           <ShortcutsSheet groups={SHORTCUTS} open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+          <SignInDialog target={signIn} profiles={sessions.profileState} onClose={() => setSignIn(undefined)} />
           <CommandPalette
             sessions={[...all.filter(s => !sessions.archived.includes(s.id)), ...grouped.archived]}
             projects={projects}
@@ -314,7 +336,6 @@ export default function Workspace() {
             panes={PANE_TABS}
             settings={[]}
             searchTranscripts={false}
-            manageProfiles={false}
             profile={entry?.profileId ?? target.profileId ?? sessions.defaultId ?? undefined}
             project={entry?.cwd ?? target.cwd}
             onSelect={onPick}
@@ -344,11 +365,12 @@ export default function Workspace() {
           groupLimit={GROUP_ROWS}
           {...sidebar}
           profiles={profiles}
-          value={entry ? entry.id : NEW}
+          value={view === 'profiles' ? '' : entry ? entry.id : NEW}
           inbox={inbox}
         />
       }
       right={
+        view === 'sessions' &&
         entry &&
         model && (
           <SessionPane
@@ -365,7 +387,18 @@ export default function Workspace() {
         )
       }
       main={
-        entry && profile && model ? (
+        view === 'profiles' ? (
+          <ProfilesView
+            profiles={profiles}
+            state={sessions.profileState}
+            onSignIn={profile => signInTo(profile)}
+            onAdd={() => setSignIn({ kind: 'add' })}
+          />
+        ) : sessions.profileState.installed === false && !entry ? (
+          <main className="flex min-h-0 flex-1 overflow-auto">
+            <NotInstalled className="m-auto max-w-lg" onCheck={sessions.profileState.refresh} />
+          </main>
+        ) : entry && profile && model ? (
           <SessionView
             sessions={sessions}
             entry={entry}
@@ -374,6 +407,7 @@ export default function Workspace() {
             exit={sessions.exits[entry.id]}
             run={runOf(entry.id, model)}
             onRunChange={patch => configure(entry.id, patch)}
+            onSignIn={signInTo}
           />
         ) : (
           <NewSession
@@ -382,6 +416,8 @@ export default function Workspace() {
             profiles={profiles}
             commands={sessions.profileCommands}
             target={{ cwd: target.cwd, profileId: target.profileId ?? sessions.defaultId ?? undefined }}
+            signedOut={sessions.profileState.signedOut}
+            onSignIn={profile => signInTo(profile)}
             onTargetChange={setTarget}
             onStart={start}
           />
