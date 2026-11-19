@@ -369,6 +369,12 @@ export const mockCommands = {
     endLogin(configDir, null, emit)
   },
 
+  auth_usage({ configDir }: { configDir: string }) {
+    claude()
+    if (!profileAt(configDir)?.signedIn) return 'Total cost: $0.0000'
+    return 'Current session: 34% used · resets 6pm (Europe/Prague)\nCurrent week (all models): 12% used · resets Nov 24 at 2am (Europe/Prague)'
+  },
+
   auth_logout({ configDir }: { configDir: string }) {
     claude()
     profiles = profiles.map(p => (p.configDir === configDir ? { configDir: p.configDir, signedIn: false, defaultModel: p.defaultModel } : p))

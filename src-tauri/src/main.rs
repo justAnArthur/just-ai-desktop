@@ -24,6 +24,7 @@ fn main() {
             auth::auth_write,
             auth::auth_cancel,
             auth::auth_logout,
+            auth::auth_usage,
             sessions::session_start,
             sessions::session_write,
             sessions::session_kill,

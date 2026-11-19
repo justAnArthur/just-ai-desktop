@@ -2,7 +2,7 @@ import { useHost, useStore } from '@just-apps/app-kit'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { interrupt as interruptLine, type Line, type PermissionMode, userMessage } from '@just-apps/claude-code'
 import { canStop, type Commands, fromTranscript, initialSession, reduce, type SessionModel } from '@just-apps/claude-code'
-import { SESSION_EXIT, SESSION_LINE, type SessionExit, type SessionLine } from '@just-apps/claude-code'
+import { parseUsage, SESSION_EXIT, SESSION_LINE, type SessionExit, type SessionLine } from '@just-apps/claude-code'
 import type { Attached } from './attachments'
 import { native } from './native/commands'
 import { createNotifier, noticeOf } from './notify'
@@ -63,11 +63,14 @@ const RELIST_DELAY = 1000
 /** A live process this long without a turn is stopped; the next message resumes it. */
 const IDLE_STOP = 10 * 60_000
 
+/** How old a profile's `/usage` reading may get before a focus reads it again. */
+const USAGE_STALE = 5 * 60_000
+
 export function useSessions() {
   const host = useHost()
   const call = useMemo(() => native(host), [host])
   const profileState = useProfiles()
-  const { profiles, defaultId, loading } = profileState
+  const { profiles, defaultId, loading, signedIn } = profileState
   // Per profile: one re-reads its sessions without touching the others' lists.
   const [lists, setLists] = useState<Record<string, Entry[]>>({})
   const [started, setStarted] = useState<Entry[]>([])
@@ -139,12 +142,36 @@ export function useSessions() {
   useEffect(() => {
     let current = true
     Promise.all(profiles.map(p => host.store.get<Windows>(`usage.${p.id}`).then(w => (w ? [[p.id, w] as const] : [])))).then(
-      pairs => current && setUsage(Object.fromEntries(pairs.flat())),
+      // Under any fresher reading that came in first.
+      pairs => current && setUsage(all => ({ ...Object.fromEntries(pairs.flat()), ...all })),
     )
     return () => {
       current = false
     }
   }, [host, profileKey])
+
+  // A signed-in profile's limits from `/usage`, at once rather than after its first turn; again on focus, at most every few minutes.
+  const usageRead = useRef(new Map<string, number>())
+  const signedInKey = profiles.filter(p => signedIn.includes(p.id)).map(p => `${p.id}=${p.configDir}`).join()
+  useEffect(() => {
+    const targets = profiles.filter(p => signedIn.includes(p.id) && p.provider === 'anthropic')
+    const read = (stale: number) => {
+      for (const { id, configDir } of targets) {
+        if (Date.now() - (usageRead.current.get(id) ?? 0) < stale) continue
+        usageRead.current.set(id, Date.now())
+        call('auth_usage', { configDir })
+          .then(text => {
+            const windows = parseUsage(text)
+            if (Object.keys(windows).length === 0) return
+            setUsage(all => ({ ...all, [id]: windows }))
+            void host.store.set(`usage.${id}`, windows)
+          })
+          .catch(error => console.error(`[sessions] usage of ${configDir}:`, error))
+      }
+    }
+    read(0)
+    return host.window.onFocusChange(focused => focused && read(USAGE_STALE))
+  }, [call, host, signedInKey])
 
   useEffect(() => {
     call('session_running').then(ids => {

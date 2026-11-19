@@ -64,7 +64,7 @@ function ProfileCard({ profile, isDefault, signedOut, state, onSignIn }: CardPro
         {profile.limits.length > 0 ? (
           profile.limits.map(limit => <Meter key={limit.label} label={limit.label} value={limit.value} detail={limit.detail} />)
         ) : (
-          <span className="text-caption text-muted-foreground">Usage shows once a session has run under it.</span>
+          <span className="text-caption text-muted-foreground">{signedOut ? 'Sign in to see its usage.' : 'This plan reports no usage limits.'}</span>
         )}
       </div>
       {error && <p className="m-0 text-caption text-destructive">{error}</p>}
@@ -76,6 +76,9 @@ function ProfileCard({ profile, isDefault, signedOut, state, onSignIn }: CardPro
         )}
         <Button size="compact" variant="ghost" onClick={() => void host.os.revealPath(profile.configDir)}>
           Open config dir
+        </Button>
+        <Button size="compact" variant="ghost" title="Takes it out of the app; its config dir stays." onClick={() => state.remove(profile.id)}>
+          Remove
         </Button>
         {!compatible &&
           (signedOut ? (
