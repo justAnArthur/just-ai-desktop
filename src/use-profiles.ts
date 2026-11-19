@@ -41,9 +41,11 @@ export function useProfiles() {
     }
   }, [call, dirs, loaded, version])
 
-  const merged = infos?.map(info => withStatus(info, statuses[info.configDir])) ?? []
-  const profiles = merged.map(info => toProfile(info, names))
-  const out = merged.filter(signedOut).map(info => profileId(info.configDir))
+  // Kept while their inputs are: a new list each render re-renders every memoized consumer.
+  const { profiles, out } = useMemo(() => {
+    const merged = infos?.map(info => withStatus(info, statuses[info.configDir])) ?? []
+    return { profiles: merged.map(info => toProfile(info, names)), out: merged.filter(signedOut).map(info => profileId(info.configDir)) }
+  }, [infos, statuses, names])
   const usable = profiles.filter(p => !out.includes(p.id))
   const refresh = () => setVersion(v => v + 1)
   return {

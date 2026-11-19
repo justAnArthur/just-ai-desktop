@@ -1,6 +1,6 @@
 import { useCommand, useHost, useStore } from '@just-apps/app-kit'
 import { Button, DesktopShell, DropdownContent, DropdownMenu, DropdownTrigger, Input, MenuItem } from '@justanarthur/modo-ui'
-import type { InboxAction, InboxItem, PaletteItem, Profile, Project, Session, SessionGroup } from '@justanarthur/modo-ui-ai'
+import type { Command, InboxAction, InboxItem, PaletteItem, Profile, Project, Session, SessionGroup } from '@justanarthur/modo-ui-ai'
 import Composer from '@justanarthur/modo-ui-ai/blocks/conversation/composer'
 import FailureState, { type FailureKind } from '@justanarthur/modo-ui-ai/blocks/conversation/failure-states'
 import CommandPalette from '@justanarthur/modo-ui-ai/blocks/dialogs/command-palette'
@@ -8,7 +8,7 @@ import ShortcutsSheet from '@justanarthur/modo-ui-ai/blocks/dialogs/shortcuts-sh
 import SessionSidebar from '@justanarthur/modo-ui-ai/blocks/sessions/session-sidebar'
 import { useIcon } from '@justanarthur/modo-ui-ai/lib/icons'
 import { duration } from '@justanarthur/modo-ui-ai/lib/pace'
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { allow, deny, notInstalled, setModel, setPermissionMode } from '@just-apps/claude-code'
 import { initialSession, type SessionModel } from '@just-apps/claude-code'
 import type { Attached } from '../attachments'
@@ -21,6 +21,7 @@ import { COMPOSER, commandsOf, DEFAULT_RUN, flagsOf, modelAlias, modelName, mode
 import { ProfilesView } from './profiles-view'
 import { PANE_TABS, type PaneTab, SessionPane } from './side-pane'
 import { SignInDialog, type SignInTarget } from './sign-in'
+import { useSame, useStable } from './stable'
 import { PendingPrompt, SessionTranscript } from './transcript-view'
 
 /** Rows a sidebar group lists before its Show more. */
@@ -43,18 +44,6 @@ function useMinuteTick() {
     next()
     return () => clearTimeout(timer)
   }, [])
-}
-
-type Handlers = Record<string, (...args: never[]) => unknown>
-
-/** Stable stand-ins for this render's callbacks, so a memoized child keeps them without going stale. */
-function useStable<T extends Handlers>(handlers: T): T {
-  const latest = useRef(handlers)
-  latest.current = handlers
-  const [stable] = useState(
-    () => Object.fromEntries(Object.keys(handlers).map(k => [k, (...args: never[]) => latest.current[k](...args)])) as T,
-  )
-  return stable
 }
 
 const firstUserText = (model?: SessionModel) =>
@@ -96,6 +85,77 @@ function SessionTitle({ title, renaming, onRename, onDone }: { title: string; re
   )
 }
 
+interface SessionComposerProps {
+  cwd: string
+  branch?: string
+  profile: Profile
+  commands: Command[]
+  compacting?: boolean
+  model: string
+  effort: string
+  mode: string
+  context: number
+  history: string[]
+  busy: boolean
+  actions: {
+    onRunChange: (patch: Partial<Run>) => void
+    onStop: () => void
+    onSend: (text: string, files: File[]) => Promise<void>
+    onCompact: () => void
+  }
+}
+
+// Memoized: a stream line re-renders the session, which must not re-render the composer and its pickers with it.
+const SessionComposer = memo(function SessionComposer({ cwd, branch, profile, model, effort, mode, busy, actions, ...props }: SessionComposerProps) {
+  return (
+    <Composer
+      {...COMPOSER}
+      {...props}
+      {...runProps({ model, effort, mode }, actions.onRunChange)}
+      projects={[{ label: basename(cwd), path: cwd }]}
+      project={cwd}
+      branches={branch ? [branch] : []}
+      branch={branch}
+      profiles={[profile]}
+      profile={profile.id}
+      status={busy ? 'streaming' : 'idle'}
+      onStop={actions.onStop}
+      onSend={actions.onSend}
+      onCompact={actions.onCompact}
+    />
+  )
+})
+
+interface SessionMenuProps {
+  canRename: boolean
+  running: boolean
+  actions: { onRename: () => void; onShortcuts: () => void; onKill: () => void }
+}
+
+// Memoized: the title bar's menu stays put while the session streams.
+const SessionMenu = memo(function SessionMenu({ canRename, running, actions }: SessionMenuProps) {
+  const More = useIcon('more-horizontal')
+  const Pencil = useIcon('pencil')
+  const Keyboard = useIcon('command')
+  const Stop = useIcon('square')
+  return (
+    <DropdownMenu>
+      <DropdownTrigger
+        render={
+          <Button variant="ghost" size="icon-compact" aria-label="Session options">
+            <More />
+          </Button>
+        }
+      />
+      <DropdownContent align="end" sideOffset={4} className="w-60 min-w-0">
+        {canRename && <MenuItem index={0} icon={Pencil} label="Rename" onSelect={actions.onRename} />}
+        <MenuItem index={1} icon={Keyboard} label="Keyboard shortcuts" onSelect={actions.onShortcuts} />
+        {running && <MenuItem index={2} icon={Stop} label="End the claude process" onSelect={actions.onKill} />}
+      </DropdownContent>
+    </DropdownMenu>
+  )
+})
+
 interface SessionViewProps {
   sessions: Sessions
   entry: Entry
@@ -116,6 +176,21 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, 
   const resetsAt = model.rateLimit?.resetsAt
   const pending = model.pending[0]
   const stderr = (exit?.stderr || model.error || '').split('\n').filter(Boolean)
+  const profileCommands = sessions.profileCommands[entry.profileId]
+  const commands = useMemo(() => commandsOf(model.commands ?? profileCommands), [model.commands, profileCommands])
+  const history = useSame(
+    model.turns.flatMap(t => (t.kind === 'user' ? [t.text] : [])),
+    (a, b) => a.length === b.length && a.every((text, i) => text === b[i]),
+  )
+  const actions = useStable({
+    onRunChange,
+    onStop: () => sessions.interrupt(id),
+    onSend: async (text: string, files: File[]) => {
+      const attachments = await attach(text, files, setSkipped)
+      if (attachments) await sessions.send(id, text, flagsOf(run), attachments)
+    },
+    onCompact: () => sessions.send(id, '/compact', flagsOf(run)),
+  })
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -142,27 +217,20 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, 
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
         <Skipped reasons={skipped} />
         {model.refused && <p className="m-0 text-caption text-destructive">Claude Code refused: {model.refused}</p>}
-        <Composer
+        <SessionComposer
           key={id}
-          {...COMPOSER}
-          commands={commandsOf(model.commands ?? sessions.profileCommands[entry.profileId])}
-          compacting={model.compacting}
-          {...runProps(run, onRunChange)}
-          projects={[{ label: basename(entry.cwd), path: entry.cwd }]}
-          project={entry.cwd}
-          branches={entry.gitBranch ? [entry.gitBranch] : []}
+          cwd={entry.cwd}
           branch={entry.gitBranch}
-          profiles={[profile]}
-          profile={profile.id}
+          profile={profile}
+          commands={commands}
+          compacting={model.compacting}
+          model={run.model}
+          effort={run.effort}
+          mode={run.mode}
           context={model.context?.window ? model.context.tokens / model.context.window : 0}
-          history={model.turns.flatMap(t => (t.kind === 'user' ? [t.text] : []))}
-          status={busy ? 'streaming' : 'idle'}
-          onStop={() => sessions.interrupt(id)}
-          onSend={async (text, files) => {
-            const attachments = await attach(text, files, setSkipped)
-            if (attachments) await sessions.send(id, text, flagsOf(run), attachments)
-          }}
-          onCompact={() => sessions.send(id, '/compact', flagsOf(run))}
+          history={history}
+          busy={busy}
+          actions={actions}
         />
       </div>
     </div>
@@ -182,10 +250,6 @@ export default function Workspace() {
   const [renaming, setRenaming] = useState<string>()
   const [paneOpen, setPaneOpen] = useStore('workspace.pane.open', false)
   const [paneTab, setPaneTab] = useStore<PaneTab>('workspace.pane.tab', 'changes')
-  const More = useIcon('more-horizontal')
-  const Pencil = useIcon('pencil')
-  const Keyboard = useIcon('command')
-  const Stop = useIcon('square')
   const [view, setView] = useState<'sessions' | 'profiles'>('sessions')
   const [signIn, setSignIn] = useState<SignInTarget>()
   const Back = useIcon('arrow-left')
@@ -220,7 +284,8 @@ export default function Workspace() {
       tasks: model?.todos.length ? { done, total: model.todos.length } : undefined,
     }
   })
-  const cwdOf = (id: string) => entries.find(e => e.id === id)?.cwd ?? ''
+  const cwds = new Map(entries.map(e => [e.id, e.cwd]))
+  const cwdOf = (id: string) => cwds.get(id) ?? ''
   const grouped = groupSessions(all, cwdOf, sessions)
   const projects: Project[] = [...new Set(entries.map(e => e.cwd))].map(path => ({ label: basename(path), path }))
   const inbox = inboxOf(
@@ -248,6 +313,12 @@ export default function Workspace() {
       setPaneOpen(true)
     }
   }
+
+  const menu = useStable({
+    onRename: () => entry && setRenaming(entry.id),
+    onShortcuts: () => setShortcutsOpen(true),
+    onKill: () => entry && sessions.kill(entry.id),
+  })
 
   const sidebar = useStable({
     onPinnedOrderChange: sessions.reorderPinned,
@@ -343,20 +414,7 @@ export default function Workspace() {
             onOpenChange={setPaletteOpen}
             trigger={null}
           />
-          <DropdownMenu>
-            <DropdownTrigger
-              render={
-                <Button variant="ghost" size="icon-compact" aria-label="Session options">
-                  <More />
-                </Button>
-              }
-            />
-            <DropdownContent align="end" sideOffset={4} className="w-60 min-w-0">
-              {entry && <MenuItem index={0} icon={Pencil} label="Rename" onSelect={() => setRenaming(entry.id)} />}
-              <MenuItem index={1} icon={Keyboard} label="Keyboard shortcuts" onSelect={() => setShortcutsOpen(true)} />
-              {running && <MenuItem index={2} icon={Stop} label="End the claude process" onSelect={() => sessions.kill(entry.id)} />}
-            </DropdownContent>
-          </DropdownMenu>
+          <SessionMenu canRename={Boolean(entry)} running={Boolean(running)} actions={menu} />
         </>
       }
       left={

@@ -368,13 +368,21 @@ export function useSessions() {
       )
   }
 
+  // The limits' "resets in" moves on with the minute, as the sidebar's labels do.
+  const minute = Math.floor(Date.now() / 60_000)
+  const shownProfiles = useMemo(
+    () =>
+      profiles.map(p => ({
+        ...p,
+        limits: limitsOf(usage[p.id]),
+        running: running.filter(id => entries.find(e => e.id === id)?.profileId === p.id).length,
+      })),
+    [profiles, usage, running, entries, minute],
+  )
+
   return {
     profileState,
-    profiles: profiles.map(p => ({
-      ...p,
-      limits: limitsOf(usage[p.id]),
-      running: running.filter(id => entryOf(id)?.profileId === p.id).length,
-    })),
+    profiles: shownProfiles,
     defaultId,
     loading,
     entries,

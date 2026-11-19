@@ -2,10 +2,13 @@ import { useHost } from '@just-apps/app-kit'
 import { AlertDialog } from '@justanarthur/modo-ui'
 import type { PaneId } from '@justanarthur/modo-ui-ai'
 import SidePane from '@justanarthur/modo-ui-ai/blocks/panes/side-pane'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { SessionModel } from '@just-apps/claude-code'
 import { type GitStatus, native } from '../native/commands'
 import { busy, sameChanges, tasksOf, touches } from '../panes'
+import { useSame, useStable } from './stable'
+
+const Pane = memo(SidePane)
 
 export type PaneTab = Extract<PaneId, 'changes' | 'tasks'>
 export const PANE_TABS: PaneTab[] = ['changes', 'tasks']
@@ -41,8 +44,11 @@ export function SessionPane({ cwd, model, live, open, tab, onTabChange, onClose,
   const seq = useRef(0)
   const working = busy(model)
   const touched = useMemo(() => touches(model), [model.turns])
-  // The pane holds a Stop until its `tasks` change: a new list each render would drop it.
-  const tasks = useMemo(() => tasksOf(model), [model.turns, working])
+  // The pane holds a Stop until its `tasks` change: a new list each render would drop it, and so would one each stream line.
+  const tasks = useSame(
+    useMemo(() => tasksOf(model), [model.turns, working]),
+    (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  )
 
   // `fresh` hands the pane new `changes` even when git reports the same ones, dropping what it shows of a failed action.
   async function load(fresh = false) {
@@ -101,30 +107,51 @@ export function SessionPane({ cwd, model, live, open, tab, onTabChange, onClose,
     return false
   }
 
+  const handlers = useStable({
+    onPaneChange: (pane: PaneId) => onTabChange(pane as PaneTab),
+    onClose,
+    onStage: (paths: string[], staged: boolean) =>
+      void act(() => (staged ? call('git_stage', { cwd, paths }) : call('git_unstage', { cwd, paths }))),
+    onRevert: (paths: string[]) => new Promise<boolean>(done => setReverting({ paths, done })),
+    onCommit: commit,
+    onOpenFile: (path: string) => void host.os.openPath(`${cwd.replace(/\/$/, '')}/${path}`),
+    onStop: onInterrupt,
+  })
+  const shownError = note ?? (error && (/not a git repository/i.test(error) ? `Not a git repository: ${cwd}` : error))
+  const canAutoCommit = live && model.status === 'idle'
+  const changes = git?.changes
+  // Kept while their values are: the session re-renders with each stream line, the pane only when what it shows changes.
+  const data = useMemo(() => ({ changes, tasks }), [changes, tasks])
+  const badges = useMemo(() => ({ changes: changes?.length ?? 0, tasks: tasks.filter(t => t.status === 'running').length }), [changes, tasks])
+  const paneProps = useMemo(
+    () => ({
+      changes: {
+        branch: git?.branch,
+        ahead: git?.ahead,
+        behind: git?.behind,
+        error: shownError,
+        canAutoCommit,
+        onStage: handlers.onStage,
+        onRevert: handlers.onRevert,
+        onCommit: handlers.onCommit,
+        onOpenFile: handlers.onOpenFile,
+      },
+      tasks: { onStop: handlers.onStop },
+    }),
+    [git?.branch, git?.ahead, git?.behind, shownError, canAutoCommit, handlers],
+  )
+
   return (
     <>
-      <SidePane
+      <Pane
         className="flex-1"
         panes={PANE_TABS}
         pane={tab}
-        onPaneChange={pane => onTabChange(pane as PaneTab)}
-        onClose={onClose}
-        data={{ changes: git?.changes, tasks }}
-        badges={{ changes: git?.changes.length ?? 0, tasks: tasks.filter(t => t.status === 'running').length }}
-        paneProps={{
-          changes: {
-            branch: git?.branch,
-            ahead: git?.ahead,
-            behind: git?.behind,
-            error: note ?? (error && (/not a git repository/i.test(error) ? `Not a git repository: ${cwd}` : error)),
-            canAutoCommit: live && model.status === 'idle',
-            onStage: (paths, staged) => void act(() => (staged ? call('git_stage', { cwd, paths }) : call('git_unstage', { cwd, paths }))),
-            onRevert: paths => new Promise<boolean>(done => setReverting({ paths, done })),
-            onCommit: commit,
-            onOpenFile: path => void host.os.openPath(`${cwd.replace(/\/$/, '')}/${path}`),
-          },
-          tasks: { onStop: onInterrupt },
-        }}
+        onPaneChange={handlers.onPaneChange}
+        onClose={handlers.onClose}
+        data={data}
+        badges={badges}
+        paneProps={paneProps}
       />
       <AlertDialog
         open={reverting !== undefined}

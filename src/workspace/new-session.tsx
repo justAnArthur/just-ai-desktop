@@ -30,7 +30,9 @@ interface NewSessionProps {
 export function NewSession({ projects, profiles, commands, target, signedOut, onSignIn, onTargetChange, onStart }: NewSessionProps) {
   const [run, setRun] = useState(DEFAULT_RUN)
   const [skipped, setSkipped] = useState<string[]>([])
-  const [draft, setDraft] = useState('')
+  // A send a signed-out profile turns into a sign-in hands its text back: the composer mounts again holding it. Not a
+  // controlled `value`, which would re-render the whole composer, pickers and all, on every keystroke.
+  const [kept, setKept] = useState({ text: '', mount: 0 })
   // As the composer resolves them: a pick its list doesn't hold stands for the first entry.
   const cwd = projects.length && !projects.some(p => p.path === target.cwd) ? projects[0].path : (target.cwd ?? '')
   const profileId = profiles.some(p => p.id === target.profileId) ? target.profileId : profiles[0]?.id
@@ -54,6 +56,7 @@ export function NewSession({ projects, profiles, commands, target, signedOut, on
         <Skipped reasons={skipped} />
         {blocked && <FailureState kind="auth-expired" profile={profile} onLogin={() => onSignIn(profile)} />}
         <Composer
+          key={kept.mount}
           {...COMPOSER}
           commands={commandsOf(commands[profile.id])}
           {...runProps(run, patch => setRun({ ...run, ...patch }))}
@@ -66,14 +69,12 @@ export function NewSession({ projects, profiles, commands, target, signedOut, on
           profile={profile.id}
           onProfileChange={id => onTargetChange({ ...target, profileId: id })}
           placeholder="Describe the task, or type / for commands"
-          // Held here: a send a signed-out profile turns into a sign-in keeps the text for after it.
-          value={draft}
-          onValueChange={setDraft}
+          defaultValue={kept.text}
           context={0}
           onSend={async (text, files) => {
+            if (!cwd || blocked) setKept(k => ({ text, mount: k.mount + 1 }))
             if (!cwd) return
             if (blocked) return onSignIn(profile)
-            setDraft('')
             const attachments = await attach(text, files, setSkipped)
             if (attachments) onStart({ cwd, profileId: profile.id, text, attachments, run })
           }}
