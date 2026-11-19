@@ -1,13 +1,12 @@
 import { Button, Code, Diff, Markdown } from '@justanarthur/modo-ui'
 import { AgentPrompt, Transcript } from '@justanarthur/modo-ui-ai'
 import { memo, type ReactNode, useMemo, useState } from 'react'
-import { allow, answer, deny, type PermissionMode, setPermissionMode } from '../engine/protocol'
+import { allow, answer, deny, type PermissionUpdate, setPermissionMode } from '../engine/protocol'
 import type { Item, Pending, SessionModel, TextItem, ToolCall, UserItem } from '../engine/session'
-import { duration, isAgent, plural } from '../panes'
+import { duration, isAgent, plural, summarize } from '../panes'
 
 const MAX_LINES = 40
 const MAX_CHARS = 4000
-const SUMMARY_KEYS = ['command', 'file_path', 'notebook_path', 'pattern', 'path', 'url', 'query', 'skill', 'description', 'prompt']
 
 interface Live {
   running: boolean
@@ -16,8 +15,6 @@ interface Live {
 
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
 const lines = (s: string) => (s ? s.split('\n') : [])
-
-const summarize = (input: Record<string, unknown>) => SUMMARY_KEYS.map(k => str(input[k])).find(Boolean)?.split('\n')[0] ?? ''
 
 function clip(text: string) {
   const head = lines(text).slice(0, MAX_LINES).join('\n').slice(0, MAX_CHARS)
@@ -178,11 +175,9 @@ const AssistantTurn = memo(function AssistantTurn({ items, streaming, live }: As
 (a, b) => a.streaming === b.streaming && a.live === b.live && sameItems(a.items, b.items))
 
 const UserTurn = memo(function UserTurn({ item }: { item: UserItem }) {
-  const images = Array.from({ length: item.attachments }, (_, i) => (
-    <Transcript.Attachment key={i} kind="image" name={`Image ${i + 1}`} />
-  ))
+  const chips = item.attachments.map((a, i) => <Transcript.Attachment key={i} kind={a.kind} name={a.name} />)
   return (
-    <Transcript.User attachments={images.length ? images : undefined}>
+    <Transcript.User attachments={chips.length ? chips : undefined}>
       <span className="whitespace-pre-wrap">{item.text}</span>
     </Transcript.User>
   )
@@ -306,8 +301,12 @@ function Questions({ pending: { requestId, input }, respond }: { pending: Pendin
   )
 }
 
-const suggestedMode = (suggestions: unknown[] = []) =>
-  (suggestions.find(s => (s as { type?: string })?.type === 'setMode') as { mode: PermissionMode } | undefined)?.mode
+/** What "Always allow" adds, as its button names it: `Bash(npm test)`, or `edits` for the accept-edits mode. */
+function ruleOf(suggestions: PermissionUpdate[]) {
+  const rules = suggestions.flatMap(s => (s.type === 'addRules' ? s.rules : []))
+  if (rules.length) return rules.map(r => (r.ruleContent ? `${r.toolName}(${r.ruleContent})` : r.toolName)).join(', ')
+  if (suggestions.some(s => s.type === 'setMode' && s.mode === 'acceptEdits')) return 'edits'
+}
 
 export function PendingPrompt({ pending, respond }: { pending: Pending; respond: (line: string) => void }) {
   const { requestId, input, tool } = pending
@@ -325,18 +324,20 @@ export function PendingPrompt({ pending, respond }: { pending: Pending; respond:
       </AgentPrompt.Plan>
     )
   const change = edit(tool, input)
-  const mode = suggestedMode(pending.suggestions)
+  const suggestions = pending.suggestions ?? []
+  const mode = suggestions.find(s => s.type === 'setMode')?.mode
   return (
     <AgentPrompt.Permission
       tool={tool}
       command={summarize(input) || clip(JSON.stringify(input, null, 2))}
       detail={change && <Diff lineNumbers={false} patch={change.patch} />}
-      rule={mode === 'acceptEdits' ? 'edits' : undefined}
+      rule={ruleOf(suggestions)}
       hint={pending.description ?? null}
       onAnswer={decision => {
         if (decision === 'deny') return respond(deny(requestId, 'Denied by the user.'))
-        respond(allow(requestId))
-        if (decision === 'always' && mode) respond(setPermissionMode(mode))
+        if (decision === 'once') return respond(allow(requestId))
+        respond(allow(requestId, undefined, suggestions))
+        if (mode) respond(setPermissionMode(mode))
       }}
     />
   )

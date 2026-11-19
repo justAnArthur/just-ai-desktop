@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { ReactElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { PermissionUpdate } from '../engine/protocol'
 import { fromTranscript, initialSession, type Pending, reduce, type SessionModel } from '../engine/session'
 import { PendingPrompt, SessionTranscript, WorkItems } from './transcript-view'
 
@@ -27,7 +28,7 @@ const sent = (pending: Pending) => {
 
 describe('SessionTranscript', () => {
   test('mounts only its last turns, the rest behind a button', () => {
-    const turns = Array.from({ length: 250 }, (_, i) => ({ kind: 'user' as const, id: `u${i}`, text: `message ${i}.`, attachments: 0 }))
+    const turns = Array.from({ length: 250 }, (_, i) => ({ kind: 'user' as const, id: `u${i}`, text: `message ${i}.`, attachments: [] }))
     const out = text(html({ ...initialSession, status: 'idle', turns }))
     expect(out).toContain('Show earlier turns')
     expect(out).toContain('message 249.')
@@ -36,7 +37,7 @@ describe('SessionTranscript', () => {
   })
 
   test('renders turns across blocks in order', () => {
-    const turns = Array.from({ length: 120 }, (_, i) => ({ kind: 'user' as const, id: `u${i}`, text: `message ${i}.`, attachments: 0 }))
+    const turns = Array.from({ length: 120 }, (_, i) => ({ kind: 'user' as const, id: `u${i}`, text: `message ${i}.`, attachments: [] }))
     const out = text(html({ ...initialSession, status: 'idle', turns }))
     const at = turns.map(t => out.indexOf(t.text))
     expect(at.every((i, n) => i >= 0 && (n === 0 || i > at[n - 1]))).toBe(true)
@@ -111,18 +112,30 @@ describe('PendingPrompt', () => {
       kind: 'permission',
       tool: 'Edit',
       input: { file_path: '/a.ts', old_string: 'a', new_string: 'b' },
-      suggestions: [{ type: 'setMode', mode: 'acceptEdits' }],
+      suggestions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }],
     }
     expect(prompt(pending)).toContain('/a.ts')
     const always = sent(pending)
     always.props.onAnswer('always')
     expect(always.out).toMatchObject([
-      { response: { request_id: 'r1', response: { behavior: 'allow' } } },
+      { response: { request_id: 'r1', response: { behavior: 'allow', updatedPermissions: pending.suggestions } } },
       { request: { subtype: 'set_permission_mode', mode: 'acceptEdits' } },
     ])
+    const once = sent(pending)
+    once.props.onAnswer('once')
+    expect(once.out).toEqual([{ type: 'control_response', response: { subtype: 'success', request_id: 'r1', response: { behavior: 'allow' } } }])
     const denied = sent(pending)
     denied.props.onAnswer('deny')
     expect(denied.out).toMatchObject([{ response: { response: { behavior: 'deny' } } }])
+  })
+
+  test('always allow adds the suggested rule', () => {
+    const rule: PermissionUpdate = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' }
+    const pending: Pending = { ...base, kind: 'permission', tool: 'Bash', input: { command: 'npm test' }, suggestions: [rule] }
+    expect(prompt(pending)).toContain('Always allow Bash(npm test)')
+    const always = sent(pending)
+    always.props.onAnswer('always')
+    expect(always.out).toEqual([{ type: 'control_response', response: { subtype: 'success', request_id: 'r1', response: { behavior: 'allow', updatedPermissions: [rule] } } }])
   })
 
   test('plan', () => {

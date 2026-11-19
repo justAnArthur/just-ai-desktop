@@ -263,6 +263,8 @@ export const mockCommands = {
   session_write({ key, line }: { key: string; line: string }, { emit }: Context) {
     const run = live.get(key)
     if (!run) throw new Error(`session ${key} is not running`)
+    // An e2e test reads what the app wrote by defining this array first.
+    ;(globalThis as { sessionWrites?: SessionLine[] }).sessionWrites?.push({ key, line })
     const message = JSON.parse(line)
     if (message.type === 'control_request') {
       if (message.request.subtype === 'interrupt') run.timers.splice(0).forEach(clearTimeout)

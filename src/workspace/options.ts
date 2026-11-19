@@ -1,5 +1,7 @@
-import type { Model, PermissionMode as ModeOption, ShortcutGroup } from '@justanarthur/modo-ui-ai'
+import type { Command, Model, PermissionMode as ModeOption, ShortcutGroup } from '@justanarthur/modo-ui-ai'
+import { ACCEPT } from '../attachments'
 import type { PermissionMode } from '../engine/protocol'
+import type { Commands } from '../engine/session'
 
 /** The composer's models; `alias` is what `--model` takes. */
 export const MODELS: (Model & { alias?: string })[] = [
@@ -18,14 +20,24 @@ export const MODES: (ModeOption & { value: PermissionMode })[] = [
   { label: 'Bypass permissions', note: 'Never asks; for sandboxes only', icon: 'triangle-alert', value: 'bypassPermissions' },
 ]
 
+// Output style and fast mode have no flag here: the kit's composer can't hide them, so style offers one choice and fast stays off.
 export const COMPOSER = {
   models: MODELS,
   efforts: EFFORTS,
   permissionModes: MODES,
   outputStyles: ['Default'],
-  commands: [],
   files: [],
+  accept: ACCEPT,
+  maxFiles: 10,
+  fast: false,
+  onFastChange: () => {},
 }
+
+/** The composer's commands from a session's `system/init`: skills apart from the other slash commands. */
+export const commandsOf = (commands?: Commands): Command[] => [
+  ...(commands?.slash ?? []).filter(name => !commands?.skills.includes(name)).map(name => ({ name: `/${name}`, description: '', kind: 'command' as const })),
+  ...(commands?.skills ?? []).map(name => ({ name: `/${name}`, description: '', kind: 'skill' as const })),
+]
 
 export const modelName = (id?: string) => MODELS.find(m => m.alias && id?.includes(m.alias))?.name ?? 'Default'
 
@@ -36,16 +48,15 @@ export interface Run {
   model: string
   effort: string
   mode: string
-  fast: boolean
 }
 
-export const DEFAULT_RUN: Run = { model: MODELS[0].name, effort: EFFORTS[Math.floor(EFFORTS.length / 2)], mode: MODES[0].label, fast: false }
+export const DEFAULT_RUN: Run = { model: MODELS[0].name, effort: EFFORTS[Math.floor(EFFORTS.length / 2)], mode: MODES[0].label }
 
 export const modelAlias = (name: string) => MODELS.find(m => m.name === name)?.alias
 
 export const modeValue = (label: string) => MODES.find(m => m.label === label)?.value
 
-/** What `--model`, `--permission-mode` and `--effort` take. Fast mode has no flag. */
+/** What `--model`, `--permission-mode` and `--effort` take. */
 export const flagsOf = (run: Run) => ({ model: modelAlias(run.model), mode: modeValue(run.mode), effort: run.effort })
 
 /** The composer's controlled run props over `run`, each change as a patch. */
@@ -56,8 +67,6 @@ export const runProps = (run: Run, change: (patch: Partial<Run>) => void) => ({
   onEffortChange: (effort: string) => change({ effort }),
   permissionMode: run.mode,
   onPermissionModeChange: (mode: string) => change({ mode }),
-  fast: run.fast,
-  onFastChange: (fast: boolean) => change({ fast }),
 })
 
 export const SHORTCUTS: ShortcutGroup[] = [

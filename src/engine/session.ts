@@ -1,8 +1,9 @@
-import type { ContentBlock, Line, PermissionMode, RateLimitInfo, ToolResultBlock, Usage } from './protocol'
+import { attachedName, type ContentBlock, type Line, type PermissionMode, type PermissionUpdate, type RateLimitInfo, type ToolResultBlock, type Usage } from './protocol'
 
 export type Status = 'starting' | 'running' | 'waiting' | 'idle' | 'failed'
 
-export interface UserItem { kind: 'user'; id: string; text: string; attachments: number }
+export interface UserAttachment { kind: 'image' | 'file'; name: string }
+export interface UserItem { kind: 'user'; id: string; text: string; attachments: UserAttachment[] }
 export interface TextItem { kind: 'text'; id: string; text: string }
 export interface ThinkingItem { kind: 'thinking'; id: string; text: string }
 export interface ToolCall {
@@ -26,7 +27,7 @@ export interface Pending {
   toolUseId: string
   tool: string
   input: Record<string, unknown>
-  suggestions?: unknown[]
+  suggestions?: PermissionUpdate[]
   description?: string
 }
 
@@ -45,7 +46,15 @@ export interface SessionModel {
   lastResult?: LastResult
   context?: { tokens: number; window?: number }
   rateLimit?: RateLimitInfo
+  /** From `system/init`: what the composer's commands list offers. */
+  commands?: Commands
+  compacting?: boolean
   error?: string
+}
+
+export interface Commands {
+  slash: string[]
+  skills: string[]
 }
 
 export const initialSession: SessionModel = { status: 'starting', turns: [], todos: [], pending: [], draft: '' }
@@ -91,6 +100,16 @@ function append(items: Item[], parent: string | null, added: Item[]) {
   return nested !== items ? nested : [...items, ...added]
 }
 
+function attachmentsOf(blocks: ContentBlock[]) {
+  let images = 0
+  return blocks.flatMap((b): UserAttachment[] => {
+    if (b.type === 'image') return [{ kind: 'image', name: `Image ${++images}` }]
+    if (b.type === 'document') return [{ kind: 'file', name: b.title ?? 'Document' }]
+    const name = b.type === 'text' && attachedName(b.text)
+    return name ? [{ kind: 'file', name }] : []
+  })
+}
+
 const activity = (pending: Pending[]): Status => (pending.length ? 'waiting' : 'running')
 
 export function reduce(model: SessionModel, raw: unknown): SessionModel {
@@ -100,10 +119,19 @@ export function reduce(model: SessionModel, raw: unknown): SessionModel {
   switch (line.type) {
     case 'system':
       if (line.subtype === 'init') {
-        const { session_id, cwd, model: name, permissionMode } = line
-        return { ...model, sessionId: session_id, cwd, model: name, permissionMode, status: model.status === 'starting' ? 'idle' : model.status }
+        const { session_id, cwd, model: name, permissionMode, slash_commands = [], skills = [] } = line
+        return {
+          ...model,
+          sessionId: session_id,
+          cwd,
+          model: name,
+          permissionMode,
+          commands: { slash: slash_commands, skills },
+          status: model.status === 'starting' ? 'idle' : model.status,
+        }
       }
-      if (line.subtype === 'status' && line.permissionMode) return { ...model, permissionMode: line.permissionMode }
+      if (line.subtype === 'status')
+        return { ...model, compacting: line.status === 'compacting', permissionMode: line.permissionMode ?? model.permissionMode }
       return model
 
     case 'user': {
@@ -128,8 +156,8 @@ export function reduce(model: SessionModel, raw: unknown): SessionModel {
       const item: UserItem = {
         kind: 'user',
         id: line.uuid ?? `user-${model.turns.length}`,
-        text: blocks.flatMap(b => (b.type === 'text' ? [b.text] : [])).join('\n'),
-        attachments: blocks.filter(b => b.type === 'image').length,
+        text: blocks.flatMap(b => (b.type === 'text' && !attachedName(b.text) ? [b.text] : [])).join('\n'),
+        attachments: attachmentsOf(blocks),
       }
       return { ...model, turns: [...model.turns, item], status: 'running', error: undefined, draft: '' }
     }
@@ -174,6 +202,7 @@ export function reduce(model: SessionModel, raw: unknown): SessionModel {
         ...model,
         status: line.is_error ? 'failed' : 'idle',
         pending: [],
+        compacting: false,
         draft: '',
         error: line.is_error ? line.result || line.errors?.join('\n') || line.subtype : model.error,
         lastResult: { costUsd: line.total_cost_usd, durationMs: line.duration_ms, isError: line.is_error, numTurns: line.num_turns, usage: line.usage },
@@ -244,4 +273,14 @@ export function fromTranscript(lines: string[]): SessionModel {
     model = { ...model, sessionId: e.sessionId ?? model.sessionId, cwd: e.cwd ?? model.cwd, permissionMode: e.permissionMode ?? model.permissionMode }
   }
   return { ...model, status: 'idle', pending: [], draft: '' }
+}
+
+/**
+ * Whether a live process can be stopped for idling: its turn is over and nothing waits on it.
+ * A background tool in the last turn may still be running inside the process, so that keeps it.
+ */
+export function canStop(model: SessionModel) {
+  if ((model.status !== 'idle' && model.status !== 'failed') || model.pending.length) return false
+  const last = model.turns.slice(model.turns.findLastIndex(i => i.kind === 'user') + 1)
+  return !last.some(i => i.kind === 'tool' && i.input.run_in_background === true)
 }

@@ -9,12 +9,13 @@ import SessionSidebar from '@justanarthur/modo-ui-ai/blocks/sessions/session-sid
 import { useIcon } from '@justanarthur/modo-ui-ai/lib/icons'
 import { duration } from '@justanarthur/modo-ui-ai/lib/pace'
 import { memo, useEffect, useRef, useState } from 'react'
-import { allow, deny, setModel, setPermissionMode } from '../engine/protocol'
+import { allow, type Attachment, deny, setModel, setPermissionMode } from '../engine/protocol'
 import { initialSession, type SessionModel } from '../engine/session'
 import { ago, basename, type Entry, groupSessions, inboxOf, statusOf } from '../sessions'
 import { type Exit, NEW, type Sessions, useSessions } from '../use-sessions'
+import { attach, Skipped } from './attach'
 import { NewSession, type Target } from './new-session'
-import { COMPOSER, DEFAULT_RUN, flagsOf, modelAlias, modelName, modeLabel, modeValue, type Run, runProps, SHORTCUTS } from './options'
+import { COMPOSER, commandsOf, DEFAULT_RUN, flagsOf, modelAlias, modelName, modeLabel, modeValue, type Run, runProps, SHORTCUTS } from './options'
 import { PANE_TABS, type PaneTab, SessionPane } from './side-pane'
 import { PendingPrompt, SessionTranscript } from './transcript-view'
 
@@ -75,6 +76,7 @@ interface SessionViewProps {
 function SessionView({ sessions, entry, profile, model, exit, run, onRunChange }: SessionViewProps) {
   const { id } = entry
   const [loginNote, setLoginNote] = useState(false)
+  const [skipped, setSkipped] = useState<string[]>([])
   const busy = sessions.running.includes(id) && (model.status === 'running' || model.status === 'waiting')
   const kind = model.status === 'failed' ? failureOf(model) : undefined
   const resetsAt = model.rateLimit?.resetsAt
@@ -107,10 +109,13 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange }
         model={model}
         footer={pending && <PendingPrompt key={pending.requestId} pending={pending} respond={line => sessions.respond(id, line)} />}
       />
-      <div className="mx-auto w-full max-w-3xl px-6 pb-4">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
+        <Skipped reasons={skipped} />
         <Composer
           key={id}
           {...COMPOSER}
+          commands={commandsOf(model.commands ?? sessions.profileCommands[entry.profileId])}
+          compacting={model.compacting}
           {...runProps(run, onRunChange)}
           projects={[{ label: basename(entry.cwd), path: entry.cwd }]}
           project={entry.cwd}
@@ -123,7 +128,10 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange }
           history={model.turns.flatMap(t => (t.kind === 'user' ? [t.text] : []))}
           status={busy ? 'streaming' : 'idle'}
           onStop={() => sessions.interrupt(id)}
-          onSend={text => sessions.send(id, text, flagsOf(run))}
+          onSend={async (text, files) => {
+            const attachments = await attach(text, files, setSkipped)
+            if (attachments) await sessions.send(id, text, flagsOf(run), attachments)
+          }}
           onCompact={() => sessions.send(id, '/compact', flagsOf(run))}
         />
       </div>
@@ -212,7 +220,7 @@ export default function Workspace() {
     onSearch: () => setPaletteOpen(true),
   })
 
-  const start = ({ run, ...options }: { cwd: string; profileId: string; text: string; run: Run }) => {
+  const start = ({ run, ...options }: { cwd: string; profileId: string; text: string; attachments: Attachment[]; run: Run }) => {
     setTarget({ cwd: options.cwd, profileId: options.profileId })
     void sessions.start({ ...options, ...flagsOf(run) }).then(id => setRuns(all => ({ ...all, [id]: run })))
   }
@@ -224,7 +232,7 @@ export default function Workspace() {
     ...runs[id],
   })
 
-  // A live process takes model and mode now; effort and fast mode wait for its next start.
+  // A live process takes model and mode now; effort waits for its next start.
   const configure = (id: string, patch: Partial<Run>) => {
     setRuns(all => ({ ...all, [id]: { ...all[id], ...patch } }))
     if (!sessions.running.includes(id)) return
@@ -333,6 +341,7 @@ export default function Workspace() {
             key={targetKey}
             projects={projects}
             profiles={profiles}
+            commands={sessions.profileCommands}
             target={{ cwd: target.cwd, profileId: target.profileId ?? sessions.defaultId ?? undefined }}
             onTargetChange={setTarget}
             onStart={start}

@@ -2,8 +2,11 @@ import { Input, Select } from '@justanarthur/modo-ui'
 import type { Profile, Project } from '@justanarthur/modo-ui-ai'
 import Composer from '@justanarthur/modo-ui-ai/blocks/conversation/composer'
 import { useState } from 'react'
+import type { Attachment } from '../engine/protocol'
+import type { Commands } from '../engine/session'
 import { basename } from '../sessions'
-import { COMPOSER, DEFAULT_RUN, type Run, runProps } from './options'
+import { attach, Skipped } from './attach'
+import { COMPOSER, commandsOf, DEFAULT_RUN, type Run, runProps } from './options'
 
 export interface Target {
   cwd?: string
@@ -13,13 +16,16 @@ export interface Target {
 interface NewSessionProps {
   projects: Project[]
   profiles: Profile[]
+  /** Per profile, the commands its last session listed. */
+  commands: Record<string, Commands>
   target: Target
   onTargetChange: (target: Target) => void
-  onStart: (options: { cwd: string; profileId: string; text: string; run: Run }) => void
+  onStart: (options: { cwd: string; profileId: string; text: string; attachments: Attachment[]; run: Run }) => void
 }
 
-export function NewSession({ projects, profiles, target, onTargetChange, onStart }: NewSessionProps) {
+export function NewSession({ projects, profiles, commands, target, onTargetChange, onStart }: NewSessionProps) {
   const [run, setRun] = useState(DEFAULT_RUN)
+  const [skipped, setSkipped] = useState<string[]>([])
   // As the composer resolves them: a pick its list doesn't hold stands for the first entry.
   const cwd = projects.length && !projects.some(p => p.path === target.cwd) ? projects[0].path : (target.cwd ?? '')
   const profileId = profiles.some(p => p.id === target.profileId) ? target.profileId : profiles[0]?.id
@@ -51,8 +57,10 @@ export function NewSession({ projects, profiles, target, onTargetChange, onStart
         )}
         <span className="min-w-0 truncate font-mono text-caption text-muted-foreground">{cwd}</span>
       </div>
+      <Skipped reasons={skipped} />
       <Composer
         {...COMPOSER}
+        commands={commandsOf(commands[profileId])}
         {...runProps(run, patch => setRun({ ...run, ...patch }))}
         target
         projects={projects.length > 0 ? projects : cwd ? [{ label: basename(cwd), path: cwd }] : []}
@@ -65,7 +73,11 @@ export function NewSession({ projects, profiles, target, onTargetChange, onStart
         onProfileChange={id => onTargetChange({ ...target, profileId: id })}
         placeholder="Describe the task, or type / for commands"
         context={0}
-        onSend={text => cwd && onStart({ cwd, profileId, text, run })}
+        onSend={async (text, files) => {
+          if (!cwd) return
+          const attachments = await attach(text, files, setSkipped)
+          if (attachments) onStart({ cwd, profileId, text, attachments, run })
+        }}
       />
     </main>
   )

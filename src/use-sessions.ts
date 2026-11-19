@@ -1,8 +1,9 @@
 import { useHost, useStore } from '@just-apps/app-kit'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { interrupt as interruptLine, type PermissionMode, userMessage } from './engine/protocol'
-import { fromTranscript, initialSession, reduce, type SessionModel } from './engine/session'
+import { type Attachment, interrupt as interruptLine, type Line, type PermissionMode, userMessage } from './engine/protocol'
+import { canStop, type Commands, fromTranscript, initialSession, reduce, type SessionModel } from './engine/session'
 import { native, SESSION_EXIT, SESSION_LINE, type SessionExit, type SessionLine } from './native/commands'
+import { createNotifier, noticeOf } from './notify'
 import { type Entry, limitsOf, mergeEntries, type Section, type Windows } from './sessions'
 import { useProfiles } from './use-profiles'
 
@@ -13,6 +14,7 @@ export interface StartOptions {
   profileId: string
   cwd: string
   text: string
+  attachments?: Attachment[]
   model?: string
   mode?: PermissionMode
   effort?: string
@@ -31,7 +33,7 @@ function parse(line: string) {
   }
 }
 
-const flags = ({ model, mode, effort }: Omit<StartOptions, 'profileId' | 'cwd' | 'text'>) => [
+const flags = ({ model, mode, effort }: Pick<StartOptions, 'model' | 'mode' | 'effort'>) => [
   ...(model ? ['--model', model] : []),
   ...(mode ? ['--permission-mode', mode] : []),
   ...(effort ? ['--effort', effort] : []),
@@ -41,6 +43,9 @@ const without = (ids: string[], id: string) => ids.filter(i => i !== id)
 
 /** How long a profile's listing waits for more turns to end before it re-reads its transcripts. */
 const RELIST_DELAY = 1000
+
+/** A live process this long without a turn is stopped; the next message resumes it. */
+const IDLE_STOP = 10 * 60_000
 
 export function useSessions() {
   const host = useHost()
@@ -59,10 +64,23 @@ export function useSessions() {
   const [sections] = useStore<Section[]>('sessions.sections', [])
   const [unread, setUnread] = useStore<string[]>('sessions.unread', [])
   const [selected, setSelected] = useStore<string>('sessions.selected', NEW)
+  // Per profile, the last `system/init`'s commands: a new session lists them before its own init.
+  const [profileCommands, setProfileCommands] = useStore<Record<string, Commands>>('sessions.commands', {})
   // Synchronous twins of `running`: a second start must see the first before React re-renders.
   const live = useRef(new Set<string>())
   const killed = useRef(new Set<string>())
   const listing = useRef(new Map<string, { timer?: ReturnType<typeof setTimeout>; seq: number }>())
+  const idleTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const focused = useRef(typeof document === 'undefined' || document.hasFocus())
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
+  const titleRef = useRef<(id: string) => string>(() => '')
+  const [notifier] = useState(() =>
+    createNotifier({
+      wanted: id => !focused.current || id !== selectedRef.current,
+      send: (id, body) => void host.notifications.send({ title: titleRef.current(id), body }).catch(error => console.error('[sessions] notify:', error)),
+    }),
+  )
 
   const profileKey = profiles.map(p => `${p.id}=${p.configDir}`).join()
   const past = useMemo(() => mergeEntries(profiles.map(p => lists[p.id] ?? [])), [lists, profileKey])
@@ -122,6 +140,38 @@ export function useSessions() {
     if (!loading) return host.window.onFocusChange(focused => focused && relist(profiles))
   }, [host, loading, profileKey])
 
+  useEffect(
+    () =>
+      host.window.onFocusChange(on => {
+        focused.current = on
+      }),
+    [host],
+  )
+
+  // Stops each live process that has idled IDLE_STOP; any new turn or prompt clears its timer.
+  useEffect(() => {
+    const timers = idleTimers.current
+    for (const [id, timer] of timers) {
+      const model = models[id]
+      if (running.includes(id) && model && canStop(model)) continue
+      clearTimeout(timer)
+      timers.delete(id)
+    }
+    for (const id of running) {
+      const model = models[id]
+      if (timers.has(id) || !model || !canStop(model)) continue
+      timers.set(
+        id,
+        setTimeout(() => {
+          timers.delete(id)
+          void kill(id).catch(error => console.error(`[sessions] idle stop of ${id}:`, error))
+        }, IDLE_STOP),
+      )
+    }
+  }, [models, running])
+
+  useEffect(() => () => idleTimers.current.forEach(clearTimeout), [])
+
   // A transcript can hold megabytes: keep only those shown, running or failed, and read the others again when shown.
   useEffect(() => {
     setModels(all => {
@@ -142,14 +192,25 @@ export function useSessions() {
     }
   }, [call, selected, entry?.configDir])
 
+  titleRef.current = id =>
+    titles[id] ?? entryOf(id)?.title ?? models[id]?.turns.find(t => t.kind === 'user')?.text.split('\n')[0]?.slice(0, 80) ?? 'Untitled session'
+
   // The native events are subscribed once; they read this render's state through the ref.
   const on = useRef({ line: (_: SessionLine) => {}, exit: (_: SessionExit) => {} })
   on.current = {
     line({ key, line }) {
       update(key, model => reduce(model, line))
-      const message = parse(line)
+      const message = parse(line) as Line | undefined
+      const notice = message && noticeOf(message)
+      if (notice) notifier.push(key, notice)
+      if (message?.type === 'system' && message.subtype === 'init') {
+        const profileId = entryOf(key)?.profileId
+        const commands: Commands = { slash: message.slash_commands ?? [], skills: message.skills ?? [] }
+        if (profileId && JSON.stringify(profileCommands[profileId]) !== JSON.stringify(commands))
+          setProfileCommands({ ...profileCommands, [profileId]: commands })
+      }
       if (message?.type === 'rate_limit_event') {
-        const windows: Windows | undefined = message.rate_limit_info?.unifiedWindows
+        const windows = message.rate_limit_info?.unifiedWindows
         const profileId = entryOf(key)?.profileId
         if (!windows || !profileId) return
         setUsage(all => ({ ...all, [profileId]: windows }))
@@ -170,7 +231,9 @@ export function useSessions() {
         ...model,
         pending: [],
         draft: '',
-        status: failed ? 'failed' : 'idle',
+        compacting: false,
+        // A stop we asked for keeps a failed turn's banner but adds none.
+        status: failed || model.status === 'failed' ? 'failed' : 'idle',
         error: failed ? (model.error ?? (stderr.trim().split('\n').pop() || `claude exited (${code ?? 'killed'})`)) : model.error,
       }))
     },
@@ -209,7 +272,7 @@ export function useSessions() {
     if (unread.includes(id)) setUnread(without(unread, id))
   }
 
-  async function start({ profileId, cwd, text, ...options }: StartOptions) {
+  async function start({ profileId, cwd, text, attachments, ...options }: StartOptions) {
     const profile = profiles.find(p => p.id === profileId)
     if (!profile) throw new Error(`no profile ${profileId}`)
     const id = crypto.randomUUID()
@@ -219,7 +282,7 @@ export function useSessions() {
     select(id)
     try {
       await spawn(target, ['--session-id', id, ...flags(options)])
-      await write(id, userMessage(text))
+      await write(id, userMessage(text, attachments))
     } catch (error) {
       fail(id, error)
     }
@@ -234,16 +297,19 @@ export function useSessions() {
   }
 
   /** `options` apply only when this starts the process. */
-  async function send(id: string, text: string, options: Parameters<typeof flags>[0] = {}) {
+  async function send(id: string, text: string, options: Parameters<typeof flags>[0] = {}, attachments: Attachment[] = []) {
     try {
       await resume(id, options)
-      await write(id, userMessage(text))
+      await write(id, userMessage(text, attachments))
     } catch (error) {
       fail(id, error)
     }
   }
 
-  const respond = (id: string, line: string) => write(id, line).catch(error => fail(id, error))
+  function respond(id: string, line: string) {
+    notifier.answered(id)
+    return write(id, line).catch(error => fail(id, error))
+  }
 
   const interrupt = (id: string) => call('session_write', { key: id, line: interruptLine() }).catch(error => fail(id, error))
 
@@ -291,6 +357,7 @@ export function useSessions() {
     sections,
     unread,
     selected,
+    profileCommands,
     select,
     start,
     send,

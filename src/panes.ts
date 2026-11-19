@@ -2,6 +2,11 @@ import type { PaneChange, PaneTask } from '@justanarthur/modo-ui-ai'
 import type { Item, SessionModel, ToolCall } from './engine/session'
 
 const TOUCHING = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash'])
+const SUMMARY_KEYS = ['command', 'file_path', 'notebook_path', 'pattern', 'path', 'url', 'query', 'skill', 'description', 'prompt']
+
+/** A tool call's input in one line: its command, path or query. */
+export const summarize = (input: Record<string, unknown>) =>
+  SUMMARY_KEYS.map(k => input[k]).find((v): v is string => typeof v === 'string' && v !== '')?.split('\n')[0] ?? ''
 
 export const isAgent = (t: ToolCall) => t.name === 'Agent' || t.name === 'Task'
 
