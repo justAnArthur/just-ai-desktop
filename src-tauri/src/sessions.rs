@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::process::CommandExt;
@@ -233,7 +233,7 @@ pub fn session_running(sessions: State<'_, Sessions>) -> Vec<String> {
     sessions.0.lock().unwrap().keys().cloned().collect()
 }
 
-#[derive(Serialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
     id: String,
@@ -351,9 +351,47 @@ fn transcripts(config_dir: &Path) -> impl Iterator<Item = PathBuf> {
         .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl") && path.is_file())
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct Cached {
+    updated: u64,
+    len: u64,
+    summary: Option<SessionSummary>,
+}
+
 /// Summaries by transcript, kept while its mtime and size hold: a refresh re-reads only the files that changed.
+/// Saved to a file, so a launch lists warm too.
 #[derive(Default)]
-pub struct Summaries(Mutex<HashMap<PathBuf, (u64, u64, Option<SessionSummary>)>>);
+pub struct Summaries {
+    map: Mutex<HashMap<PathBuf, Cached>>,
+    file: OnceLock<Option<PathBuf>>,
+}
+
+impl Summaries {
+    /// Loads the saved summaries on first use; a missing or unreadable file starts empty.
+    pub fn saved_at(&self, file: impl FnOnce() -> Option<PathBuf>) -> &Self {
+        self.file.get_or_init(|| {
+            let file = file()?;
+            if let Some(saved) = fs::read(&file).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()) {
+                *self.map.lock().unwrap() = saved;
+            }
+            Some(file)
+        });
+        self
+    }
+
+    fn save(&self, map: &HashMap<PathBuf, Cached>) {
+        let Some(Some(file)) = self.file.get() else { return };
+        // Through a temp file: a crash mid-write leaves the old cache, not half a new one.
+        let tmp = file.with_extension("tmp");
+        let written = file.parent().map_or(Ok(()), fs::create_dir_all).and_then(|_| {
+            fs::write(&tmp, serde_json::to_vec(map).map_err(std::io::Error::other)?)?;
+            fs::rename(&tmp, file)
+        });
+        if let Err(e) = written {
+            eprintln!("[sessions] saving {}: {e}", file.display());
+        }
+    }
+}
 
 pub fn sessions_in(config_dir: &Path, limit: usize, cache: &Summaries) -> Vec<SessionSummary> {
     let mut files: Vec<(PathBuf, u64, u64)> = transcripts(config_dir)
@@ -364,24 +402,42 @@ pub fn sessions_in(config_dir: &Path, limit: usize, cache: &Summaries) -> Vec<Se
         })
         .collect();
     files.sort_by(|a, b| b.1.cmp(&a.1));
-    let mut cache = cache.0.lock().unwrap();
-    files
+    let seen: HashSet<PathBuf> = files.iter().map(|(path, ..)| path.clone()).collect();
+    let mut changed = false;
+    // Locked per file, not across the reads: the profiles list in parallel.
+    let found = files
         .into_iter()
-        .filter_map(|(path, updated, len)| match cache.get(&path) {
-            Some((at, size, summary)) if *at == updated && *size == len => summary.clone(),
-            _ => {
+        .filter_map(|(path, updated, len)| {
+            let hit = cache.map.lock().unwrap().get(&path).filter(|c| c.updated == updated && c.len == len).map(|c| c.summary.clone());
+            hit.unwrap_or_else(|| {
                 let summary = summarize(&path, updated);
-                cache.insert(path, (updated, len, summary.clone()));
+                cache.map.lock().unwrap().insert(path, Cached { updated, len, summary: summary.clone() });
+                changed = true;
                 summary
-            }
+            })
         })
         .take(limit)
-        .collect()
+        .collect();
+    let projects = config_dir.join("projects");
+    let mut map = cache.map.lock().unwrap();
+    let before = map.len();
+    map.retain(|path, _| !path.starts_with(&projects) || seen.contains(path));
+    if changed || map.len() != before {
+        cache.save(&map);
+    }
+    found
 }
 
 #[tauri::command]
-pub async fn list_sessions(cache: State<'_, Summaries>, config_dir: String, limit: Option<usize>) -> Result<Vec<SessionSummary>, String> {
-    Ok(sessions_in(&expand(&home(), config_dir.trim_end_matches('/')), limit.unwrap_or(200), &cache))
+pub async fn list_sessions(
+    app: AppHandle,
+    cache: State<'_, Summaries>,
+    config_dir: String,
+    limit: Option<usize>,
+) -> Result<Vec<SessionSummary>, String> {
+    // Versioned: a summary of another shape is not read back.
+    let cache = cache.saved_at(|| app.path().app_cache_dir().ok().map(|dir| dir.join("summaries-v1.json")));
+    Ok(sessions_in(&expand(&home(), config_dir.trim_end_matches('/')), limit.unwrap_or(200), cache))
 }
 
 #[tauri::command]
@@ -509,6 +565,35 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(first.prompt().unwrap().chars().count(), TITLE_CHARS + 1);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn keeps_summaries_across_launches() {
+        let dir = env::temp_dir().join(format!("ai-desktop-saved-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let project = dir.join("projects/-Users-you-app");
+        write(&project.join("a.jsonl"), &[r#"{"type":"user","cwd":"/Users/you/app","message":{"content":"Hello"}}"#]);
+        let file = dir.join("cache/summaries.json");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "{not json").unwrap();
+
+        let first = Summaries::default();
+        let listed = sessions_in(&dir, 200, first.saved_at(|| Some(file.clone())));
+        assert_eq!(listed.len(), 1);
+
+        let relaunch = Summaries::default();
+        relaunch.saved_at(|| Some(file.clone()));
+        assert_eq!(relaunch.map.lock().unwrap().len(), 1);
+        assert_eq!(sessions_in(&dir, 200, &relaunch), listed);
+
+        // A deleted transcript leaves the saved cache too.
+        fs::remove_file(project.join("a.jsonl")).unwrap();
+        assert!(sessions_in(&dir, 200, &relaunch).is_empty());
+        let after = Summaries::default();
+        after.saved_at(|| Some(file.clone()));
+        assert!(after.map.lock().unwrap().is_empty());
 
         fs::remove_dir_all(&dir).unwrap();
     }

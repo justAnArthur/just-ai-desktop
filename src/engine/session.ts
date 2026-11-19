@@ -66,20 +66,23 @@ const time = (iso?: string) => (iso ? Date.parse(iso) : undefined)
 const text = (content: ToolResultBlock['content']) =>
   typeof content === 'string' ? content : (content ?? []).flatMap(b => (b.type === 'text' ? [b.text] : [])).join('\n')
 
+// From the end, stopping at the match: results land on recent tools, and every other item stays as it is.
 function updateTool(items: Item[], id: string, f: (tool: ToolCall) => ToolCall): Item[] {
-  let changed = false
-  const next = items.map(item => {
-    if (item.kind !== 'tool') return item
-    if (item.id === id) {
-      changed = true
-      return f(item)
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]
+    if (item.kind !== 'tool') continue
+    let next: ToolCall = item
+    if (item.id === id) next = f(item)
+    else {
+      const children = updateTool(item.children, id, f)
+      if (children !== item.children) next = { ...item, children }
     }
-    const children = updateTool(item.children, id, f)
-    if (children === item.children) return item
-    changed = true
-    return { ...item, children }
-  })
-  return changed ? next : items
+    if (next === item) continue
+    const copy = items.slice()
+    copy[i] = next
+    return copy
+  }
+  return items
 }
 
 function append(items: Item[], parent: string | null, added: Item[]) {

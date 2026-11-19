@@ -35,6 +35,13 @@ describe('SessionTranscript', () => {
     expect(out).not.toContain('message 49.')
   })
 
+  test('renders turns across blocks in order', () => {
+    const turns = Array.from({ length: 120 }, (_, i) => ({ kind: 'user' as const, id: `u${i}`, text: `message ${i}.`, attachments: 0 }))
+    const out = text(html({ ...initialSession, status: 'idle', turns }))
+    const at = turns.map(t => out.indexOf(t.text))
+    expect(at.every((i, n) => i >= 0 && (n === 0 || i > at[n - 1]))).toBe(true)
+  })
+
   test('past transcript', async () => {
     const model = fromTranscript(await lines('transcript.jsonl'))
     const out = text(html(model))

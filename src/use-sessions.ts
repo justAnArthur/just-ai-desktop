@@ -122,6 +122,14 @@ export function useSessions() {
     if (!loading) return host.window.onFocusChange(focused => focused && relist(profiles))
   }, [host, loading, profileKey])
 
+  // A transcript can hold megabytes: keep only those shown, running or failed, and read the others again when shown.
+  useEffect(() => {
+    setModels(all => {
+      const kept = Object.entries(all).filter(([id, model]) => id === selected || live.current.has(id) || model.status === 'failed')
+      return kept.length === Object.keys(all).length ? all : Object.fromEntries(kept)
+    })
+  }, [selected, running])
+
   const entry = entryOf(selected)
   useEffect(() => {
     if (!entry || models[selected]) return

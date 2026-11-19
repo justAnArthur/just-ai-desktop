@@ -40,7 +40,7 @@ export function SessionPane({ cwd, model, live, open, tab, onTabChange, onClose,
   latest.current = git
   const seq = useRef(0)
   const working = busy(model)
-  const touched = touches(model)
+  const touched = useMemo(() => touches(model), [model.turns])
   // The pane holds a Stop until its `tasks` change: a new list each render would drop it.
   const tasks = useMemo(() => tasksOf(model), [model.turns, working])
 

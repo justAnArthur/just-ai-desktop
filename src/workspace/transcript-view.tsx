@@ -213,6 +213,32 @@ const SETTLED: Live = { running: false, waiting: new Set() }
 /** A tool still without a result: its status follows the session's. */
 const unsettled = (items: Item[]): boolean => items.some(i => i.kind === 'tool' && (i.result === undefined || unsettled(i.children)))
 
+/** Turns per memoized block: a new line re-renders its block alone, where each memoized turn would cost React a walk up the tree. */
+const BLOCK = 50
+
+interface BlockProps {
+  groups: Item[][]
+  /** The block holds the streaming last turn. */
+  streaming: boolean
+  live: Live
+}
+
+const sameGroups = (a: Item[][], b: Item[][]) => a.length === b.length && a.every((group, i) => sameItems(group, b[i]))
+
+const Block = memo(function Block({ groups, streaming, live }: BlockProps) {
+  return groups.map((group, i) => (
+    // Off-screen turns skip layout, so a resize (the side pane's drag, the window) re-lays out only the visible ones.
+    <div key={group[0].id} className="content-visibility-auto [contain-intrinsic-size:auto_20rem]">
+      {group[0].kind === 'user' ? (
+        <UserTurn item={group[0]} />
+      ) : (
+        <AssistantTurn items={group} streaming={streaming && i === groups.length - 1} live={unsettled(group) ? live : SETTLED} />
+      )}
+    </div>
+  ))
+},
+(a, b) => a.streaming === b.streaming && a.live === b.live && sameGroups(a.groups, b.groups))
+
 export function SessionTranscript({ model, footer }: { model: SessionModel; footer?: ReactNode }) {
   const draft: TextItem[] = model.draft ? [{ kind: 'text', id: 'draft', text: model.draft }] : []
   const groups = turns([...model.turns, ...draft])
@@ -226,6 +252,9 @@ export function SessionTranscript({ model, footer }: { model: SessionModel; foot
   if (first === undefined && groups.length) setFirst(groups[auto][0].id)
   const at = groups.findIndex(g => g[0].id === first)
   const start = at === -1 ? auto : at
+  // Blocks are cut at fixed indexes, so "Show earlier" fills the first and keeps the rest.
+  const blocks: number[] = []
+  for (let i = start; i < groups.length; i = (Math.floor(i / BLOCK) + 1) * BLOCK) blocks.push(i)
   const tasks = model.todos.length > 0 && <Transcript.TaskList items={model.todos} />
   const last = groups.at(-1)?.[0]
   return (
@@ -235,16 +264,10 @@ export function SessionTranscript({ model, footer }: { model: SessionModel; foot
           Show earlier turns
         </Button>
       )}
-      {groups.slice(start).map((group, i) => (
-        // Off-screen turns skip layout, so a resize (the side pane's drag, the window) re-lays out only the visible ones.
-        <div key={group[0].id} className="content-visibility-auto [contain-intrinsic-size:auto_20rem]">
-          {group[0].kind === 'user' ? (
-            <UserTurn item={group[0]} />
-          ) : (
-            <AssistantTurn items={group} streaming={running && start + i === groups.length - 1} live={unsettled(group) ? live : SETTLED} />
-          )}
-        </div>
-      ))}
+      {blocks.map((from, i) => {
+        const to = blocks[i + 1] ?? groups.length
+        return <Block key={Math.floor(from / BLOCK)} groups={groups.slice(from, to)} streaming={running && to === groups.length} live={live} />
+      })}
       {running && (!last || last.kind === 'user') && <Transcript.Working />}
     </Transcript>
   )

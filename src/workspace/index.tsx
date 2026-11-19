@@ -8,7 +8,7 @@ import ShortcutsSheet from '@justanarthur/modo-ui-ai/blocks/dialogs/shortcuts-sh
 import SessionSidebar from '@justanarthur/modo-ui-ai/blocks/sessions/session-sidebar'
 import { useIcon } from '@justanarthur/modo-ui-ai/lib/icons'
 import { duration } from '@justanarthur/modo-ui-ai/lib/pace'
-import { memo, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { allow, deny, setModel, setPermissionMode } from '../engine/protocol'
 import { initialSession, type SessionModel } from '../engine/session'
 import { ago, basename, type Entry, groupSessions, inboxOf, statusOf } from '../sessions'
@@ -23,6 +23,22 @@ const GROUP_ROWS = 5
 
 // The kit memoizes rows and groups, but the sidebar itself would still re-render with every stream line: re-render on changed data only.
 const Sidebar = memo(SessionSidebar, (a, b) => JSON.stringify(a) === JSON.stringify(b))
+
+/** Re-renders on each minute of the clock, so the sidebar's "5m" labels move on while nothing else happens. */
+function useMinuteTick() {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>
+    const next = () => {
+      timer = setTimeout(() => {
+        setTick(t => t + 1)
+        next()
+      }, 60_000 - (Date.now() % 60_000))
+    }
+    next()
+    return () => clearTimeout(timer)
+  }, [])
+}
 
 type Handlers = Record<string, (...args: never[]) => unknown>
 
@@ -130,6 +146,7 @@ export default function Workspace() {
   const More = useIcon('more-horizontal')
   const Keyboard = useIcon('command')
   const Stop = useIcon('square')
+  useMinuteTick()
   useCommand({ id: 'session.new', title: 'New session', shortcut: 'Mod+N', run: () => select(NEW) })
 
   const now = Date.now()

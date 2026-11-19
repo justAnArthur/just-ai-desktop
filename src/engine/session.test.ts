@@ -72,6 +72,16 @@ describe('live stream', () => {
     expect(m).toMatchObject({ status: 'idle', pending: [], lastResult: { isError: false } })
   })
 
+  test('a tool result copies only the path to its tool', () => {
+    const use = (id: string) => JSON.stringify({ type: 'assistant', message: { id, model: 'm', content: [{ type: 'tool_use', id, name: 'Bash', input: {} }] } })
+    const before = ['t1', 't2', 't3'].map(use).reduce<SessionModel>(reduce, initialSession)
+    const after = reduce(before, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't2', content: 'ok' }] } }))
+    expect(after.turns.map(t => t === before.turns[after.turns.indexOf(t)])).toEqual([true, false, true])
+    expect(tool(after.turns, 'Bash')).toBe(before.turns[0] as ToolCall)
+    expect((after.turns[1] as ToolCall).result).toBe('ok')
+    expect(reduce(after, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'none', content: 'x' }] } })).turns).toBe(after.turns)
+  })
+
   test('api error result', async () => {
     const m = replay(await lines('auth-error.jsonl'))
     expect(m.status).toBe('failed')
