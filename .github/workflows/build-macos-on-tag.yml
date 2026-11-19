@@ -62,12 +62,23 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # just-apps lists every app as a bun workspace and Cargo member; only this one is checked out here
-      # (the others are empty submodule dirs), and both tools fail on a workspace that isn't there.
-      - name: Keep the workspaces this checkout has
+      - name: Keep the workspaces that are here
         run: |
-          bun -e 'const fs = require("fs"); const p = await Bun.file("package.json").json(); p.workspaces = p.workspaces.filter(w => w.includes("*") || fs.existsSync(`${w}/package.json`)); await Bun.write("package.json", JSON.stringify(p, null, 2))'
-          bun -e 'const fs = require("fs"); const t = fs.readFileSync("Cargo.toml", "utf8"); fs.writeFileSync("Cargo.toml", t.replace(/members = \[(.*?)\]/s, (_, list) => `members = [${[...list.matchAll(/"([^"]+)"/g)].map(m => m[1]).filter(g => [...new Bun.Glob(`${g}/Cargo.toml`).scanSync(".")].length > 0).map(g => JSON.stringify(g)).join(", ")}]`))'
+          cat > "$RUNNER_TEMP/trim-workspaces.ts" <<'EOF'
+            // Only this app is checked out: the other apps are empty submodule folders, which neither bun nor cargo can load.
+            import { existsSync } from 'node:fs'
+
+            const manifest = await Bun.file('package.json').json()
+            manifest.workspaces = manifest.workspaces.filter((w: string) => w.includes('*') || existsSync(`${w}/package.json`))
+            await Bun.write('package.json', JSON.stringify(manifest, null, 2))
+
+            const cargo = await Bun.file('Cargo.toml').text()
+            const members = [...(cargo.match(/members = \[([^\]]*)\]/)?.[1] ?? '').matchAll(/"([^"]+)"/g)].map(m => m[1] as string)
+            const kept = members.filter(m => [...new Bun.Glob(`${m}/Cargo.toml`).scanSync('.')].length > 0)
+            await Bun.write('Cargo.toml', cargo.replace(/members = \[[^\]]*\]/, `members = [${kept.map(m => JSON.stringify(m)).join(', ')}]`))
+            console.log(`workspaces: ${manifest.workspaces.join(', ')}; cargo members: ${kept.join(', ')}`)
+          EOF
+          bun "$RUNNER_TEMP/trim-workspaces.ts"
 
       - run: bun install
 
