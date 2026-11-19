@@ -67,6 +67,22 @@ export function mergeEntries(lists: Entry[][]) {
   return [...byId.values()].sort((a, b) => b.updated - a.updated)
 }
 
+// The kit keys groups by label, so two folders with one name (…/a/ui, …/b/ui) would share a React key and mix up
+// their rows. Each clashing label takes parent folders, nearest first, until it is unique: "ui · a", "ui · b".
+function distinctLabels(groups: SessionGroup[]) {
+  for (let depth = 1; ; depth++) {
+    const count = new Map<string, number>()
+    for (const g of groups) count.set(g.label, (count.get(g.label) ?? 0) + 1)
+    const clashing = groups.filter(g => (count.get(g.label) ?? 0) > 1)
+    if (!clashing.length) return
+    for (const g of clashing) {
+      const parts = (g.path ?? g.label).replace(/\/+$/, '').split('/').filter(Boolean)
+      const parents = parts.slice(0, -1).reverse().slice(0, depth)
+      g.label = depth > parts.length ? (g.path ?? g.label) : [parts.at(-1), ...parents].join(' · ')
+    }
+  }
+}
+
 /** Pinned, the user's sections, then one group per project folder in order of its latest session; archived apart. */
 export function groupSessions(
   sessions: Session[],
@@ -84,6 +100,7 @@ export function groupSessions(
     projects.set(cwd, group)
     group.sessions.push({ ...session, project: undefined })
   }
+  distinctLabels([...projects.values()])
   return {
     pinned: pick(pinned).map(s => ({ ...s, pinned: true })),
     groups: [...sections.map((s): SessionGroup => ({ label: s.label, kind: 'section', sessions: pick(s.ids) })), ...projects.values()],

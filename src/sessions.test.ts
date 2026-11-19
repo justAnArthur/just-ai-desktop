@@ -53,6 +53,13 @@ test('groups: pinned, sections, projects by folder, archived', () => {
   ])
 })
 
+test('groups: folders with one name get their parents until unique', () => {
+  const s = (id: string): Session => ({ id, title: id, status: 'idle', profile: 'p', updated: 'now' })
+  const cwd: Record<string, string> = { a: '/x/one/ui', b: '/x/two/ui', c: '/y/one/ui', d: '/u/api' }
+  const out = groupSessions([s('a'), s('b'), s('c'), s('d')], id => cwd[id] ?? '', { pinned: [], archived: [], sections: [] })
+  expect(out.groups.map(g => g.label)).toEqual(['ui · one · x', 'ui · two', 'ui · one · y', 'api'])
+})
+
 test('inbox: one row per waiting prompt', () => {
   const session: Session = { id: 's', title: 'Fix it', status: 'waiting', profile: 'p', updated: 'now', project: 'demo' }
   const model = {
