@@ -1,5 +1,5 @@
 import { useHost } from '@just-apps/app-kit'
-import { Button, Dialog, Input } from '@justanarthur/modo-ui'
+import { Dialog } from '@justanarthur/modo-ui'
 import type { Profile } from '@justanarthur/modo-ui-ai'
 import ProfileOnboarding, { type OnboardingStep, type ProfileDraft } from '@justanarthur/modo-ui-ai/blocks/profiles/profile-onboarding'
 import { type MouseEvent, useEffect, useMemo, useState } from 'react'
@@ -10,38 +10,6 @@ import type { Profiles } from '../use-profiles'
 
 /** Adding a profile, or signing an existing one in again. */
 export type SignInTarget = { kind: 'add' } | { kind: 'sign-in'; profile: Profile; onSignedIn?: () => void }
-
-/** The sign-in page's code, for when its browser can't reach the CLI's localhost callback. */
-function CodeField({ onSubmit }: { onSubmit: (code: string) => void }) {
-  const [code, setCode] = useState('')
-  const submit = () => {
-    if (!code.trim()) return
-    onSubmit(code.trim())
-    setCode('')
-  }
-  return (
-    <form
-      className="flex items-end gap-2"
-      onSubmit={e => {
-        e.preventDefault()
-        submit()
-      }}
-    >
-      <Input
-        aria-label="Sign-in code"
-        variant="bordered"
-        size="compact"
-        className="min-w-0 flex-1"
-        placeholder="The page shows a code instead? Paste it here"
-        value={code}
-        onValueChange={setCode}
-      />
-      <Button type="submit" variant="secondary" size="compact" disabled={!code.trim()}>
-        Submit code
-      </Button>
-    </form>
-  )
-}
 
 interface SignInDialogProps {
   target?: SignInTarget
@@ -101,16 +69,17 @@ export function SignInDialog({ target, profiles, onClose }: SignInDialogProps) {
         <div className="flex flex-col gap-4" onClickCapture={openOutside}>
           <ProfileOnboarding.Panel
             key={existing?.id ?? 'add'}
+            mode={existing ? 'sign-in' : 'add'}
             step={step}
             onStepChange={setStep}
             defaultDraft={existing && { name: existing.name, configDir: existing.configDir }}
             taken={existing ? [] : profiles.profiles.flatMap(p => [p.id, p.name])}
             signIn={login}
             onSignIn={draft => void begin(draft)}
+            onSubmitCode={code => void paste(code)}
             onComplete={close}
             onCancel={close}
           />
-          {step === 'sign-in' && login.state === 'waiting' && <CodeField onSubmit={paste} />}
         </div>
       </Dialog.Content>
     </Dialog>

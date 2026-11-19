@@ -479,6 +479,8 @@ export default function Workspace() {
             target={{ cwd: target.cwd, profileId: target.profileId ?? sessions.defaultId ?? undefined }}
             signedOut={sessions.profileState.signedOut}
             onSignIn={profile => signInTo(profile)}
+            onAddProfile={() => setSignIn({ kind: 'add' })}
+            onManageProfiles={openProfiles}
             onTargetChange={setTarget}
             onStart={start}
           />

@@ -23,11 +23,13 @@ interface NewSessionProps {
   /** Profiles with no account: picked, they offer a sign-in instead of starting. */
   signedOut: string[]
   onSignIn: (profile: Profile) => void
+  onAddProfile: () => void
+  onManageProfiles: () => void
   onTargetChange: (target: Target) => void
   onStart: (options: { cwd: string; profileId: string; text: string; attachments: Attached[]; run: Run }) => void
 }
 
-export function NewSession({ projects, profiles, commands, target, signedOut, onSignIn, onTargetChange, onStart }: NewSessionProps) {
+export function NewSession({ projects, profiles, commands, target, signedOut, onSignIn, onAddProfile, onManageProfiles, onTargetChange, onStart }: NewSessionProps) {
   const [run, setRun] = useState(DEFAULT_RUN)
   const [skipped, setSkipped] = useState<string[]>([])
   // A send a signed-out profile turns into a sign-in hands its text back: the composer mounts again holding it. Not a
@@ -68,6 +70,8 @@ export function NewSession({ projects, profiles, commands, target, signedOut, on
           profiles={profiles}
           profile={profile.id}
           onProfileChange={id => onTargetChange({ ...target, profileId: id })}
+          onAddProfile={onAddProfile}
+          onManageProfiles={onManageProfiles}
           placeholder="Describe the task, or type / for commands"
           defaultValue={kept.text}
           context={0}
