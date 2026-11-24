@@ -397,7 +397,12 @@ export const mockCommands = {
   auth_usage({ configDir }: { configDir: string }) {
     claude()
     if (!profileAt(configDir)?.signedIn) return 'Total cost: $0.0000'
-    return 'Current session: 34% used · resets 6pm (Europe/Prague)\nCurrent week (all models): 12% used · resets Nov 24 at 2am (Europe/Prague)'
+    // As the CLI prints them, 3 hours and 4 days from now.
+    const time = (at: Date) => `${at.getHours() % 12 || 12}:${String(at.getMinutes()).padStart(2, '0')}${at.getHours() < 12 ? 'am' : 'pm'}`
+    const session = new Date(Date.now() + 3 * hour)
+    const week = new Date(Date.now() + 96 * hour)
+    const day = `${week.toLocaleString('en-US', { month: 'short' })} ${week.getDate()}`
+    return `Current session: 34% used · resets ${time(session)} (Europe/Prague)\nCurrent week (all models): 12% used · resets ${day} at ${time(week)} (Europe/Prague)`
   },
 
   auth_logout({ configDir }: { configDir: string }) {

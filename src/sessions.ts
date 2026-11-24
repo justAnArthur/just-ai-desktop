@@ -34,8 +34,9 @@ export function limitsOf(windows: Windows | undefined, now = Date.now()): UsageL
     const window = windows?.[key]
     if (!window) return []
     const resetsInHours = (window.resetsAt * 1000 - now) / HOUR
-    // Past its reset the stored share is stale: the window has started over.
-    if (resetsInHours <= 0) return []
+    // Past its reset the stored share is stale: the window has started over. A reset further off than the window is
+    // long is one that passed, read as the next day's or year's.
+    if (resetsInHours <= 0 || resetsInHours > windowHours) return []
     const value = window.utilization
     return [{ label, value, detail: `${Math.round(value * 100)}% · ${duration(resetsInHours)}`, windowHours, resetsInHours }]
   })
@@ -63,9 +64,9 @@ export function projectsOf(entries: Entry[], hidden: string[]): Project[] {
     if (!cwd || throwaway(cwd) || hidden.includes(cwd)) continue
     latest.set(cwd, Math.max(latest.get(cwd) ?? 0, updated))
   }
-  return [...latest]
-    .sort((a, b) => b[1] - a[1])
-    .map(([path]) => ({ label: basename(path), path }))
+  const projects = [...latest].sort((a, b) => b[1] - a[1]).map(([path]) => ({ label: basename(path), path }))
+  distinctLabels(projects)
+  return projects
 }
 
 export function statusOf(model: SessionModel | undefined, running: boolean, unread: boolean): SessionStatus {
@@ -84,9 +85,9 @@ export function mergeEntries(lists: Entry[][]) {
   return [...byId.values()].sort((a, b) => b.updated - a.updated)
 }
 
-// The kit keys groups by label, so two folders with one name (…/a/ui, …/b/ui) would share a React key and mix up
-// their rows. Each clashing label takes parent folders, nearest first, until it is unique: "ui · a", "ui · b".
-function distinctLabels(groups: SessionGroup[]) {
+// The kit keys groups and palette rows by label, so two folders with one name (…/a/ui, …/b/ui) would share a React
+// key and mix up their rows. Each clashing label takes parent folders, nearest first, until it is unique: "ui · a", "ui · b".
+function distinctLabels(groups: { label: string; path?: string }[]) {
   for (let depth = 1; ; depth++) {
     const count = new Map<string, number>()
     for (const g of groups) count.set(g.label, (count.get(g.label) ?? 0) + 1)

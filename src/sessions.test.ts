@@ -14,6 +14,8 @@ test('limits from the stream windows, dropping a window past its reset', () => {
   )
   expect(limits).toEqual([{ label: 'Session (5h)', value: 0.13, detail: '13% · 2h', windowHours: 5, resetsInHours: 2 }])
   expect(limitsOf(undefined, now)).toEqual([])
+  // A 5h window "resetting" in 23h is one whose reset passed: read as tomorrow's.
+  expect(limitsOf({ five_hour: { utilization: 0.3, resetsAt: at(23), status: 'allowed' } }, now)).toEqual([])
 })
 
 test('relative time', () => {
@@ -99,4 +101,9 @@ test('projects: one per folder, latest session first, less throwaway and hidden 
     { label: 'old', path: '/Users/a/old' },
     { label: 'new', path: '/Users/a/new' },
   ])
+})
+
+test('projects with one folder name take their parents', () => {
+  const entry = (cwd: string): Entry => ({ id: cwd, profileId: 'p', configDir: '~/.claude', cwd, updated: 1 })
+  expect(projectsOf([entry('/x/a/ui'), entry('/x/b/ui'), entry('/x/api')], []).map(p => p.label)).toEqual(['ui · a', 'ui · b', 'api'])
 })
