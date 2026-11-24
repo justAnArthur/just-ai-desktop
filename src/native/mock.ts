@@ -384,6 +384,11 @@ export const mockCommands = {
     profiles = profiles.map(p => (p.configDir === configDir ? { configDir: p.configDir, signedIn: false, defaultModel: p.defaultModel } : p))
   },
 
+  // The mock lists one set of sessions for every profile, so a copy has nothing to add.
+  copy_session({ sessionId }: { fromConfigDir: string; toConfigDir: string; sessionId: string }) {
+    if (!heavy && !sessions.some(s => s.id === sessionId)) throw new Error(`no transcript for session ${sessionId}`)
+  },
+
   set_session_title({ sessionId, title }: { configDir: string; sessionId: string; title: string }) {
     const session = sessions.find(s => s.id === sessionId)
     if (!session) throw new Error(`no transcript for session ${sessionId}`)

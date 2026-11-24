@@ -103,11 +103,14 @@ interface SessionComposerProps {
     onStop: () => void
     onSend: (text: string, files: File[]) => Promise<void>
     onCompact: () => void
+    onProfileChange: (profileId: string) => void
   }
+  /** Every profile, for continuing the session under another. */
+  profiles: Profile[]
 }
 
 // Memoized: a stream line re-renders the session, which must not re-render the composer and its pickers with it.
-const SessionComposer = memo(function SessionComposer({ cwd, branch, profile, model, effort, mode, busy, actions, ...props }: SessionComposerProps) {
+const SessionComposer = memo(function SessionComposer({ cwd, branch, profile, profiles, model, effort, mode, busy, actions, ...props }: SessionComposerProps) {
   return (
     <Composer
       {...COMPOSER}
@@ -117,8 +120,9 @@ const SessionComposer = memo(function SessionComposer({ cwd, branch, profile, mo
       project={cwd}
       branches={branch ? [branch] : []}
       branch={branch}
-      profiles={[profile]}
+      profiles={profiles}
       profile={profile.id}
+      onProfileChange={actions.onProfileChange}
       status={busy ? 'streaming' : 'idle'}
       onStop={actions.onStop}
       onSend={actions.onSend}
@@ -191,7 +195,20 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, 
       if (attachments) await sessions.send(id, text, flagsOf(run), attachments)
     },
     onCompact: () => sessions.send(id, '/compact', flagsOf(run)),
+    onProfileChange: (profileId: string) => {
+      const next = sessions.profiles.find(p => p.id === profileId)
+      if (!next || profileId === entry.profileId) return
+      const move = () =>
+        sessions
+          .continueUnder(id, profileId)
+          .then(() => toast.success({ title: `Continues under ${next.name}`, description: `The next message runs on ${next.name}; the copy under ${profile.name} stays as it was.` }))
+          .catch(error => toast.error({ title: `Couldn’t move it to ${next.name}`, description: String(error) }))
+      if (sessions.profileState.signedOut.includes(profileId)) onSignIn(next, () => void move())
+      else void move()
+    },
   })
+  // Kept while unchanged: the composer is memoized, and a new list each render would re-render it with every line.
+  const profiles = useSame(sessions.profiles, (a, b) => JSON.stringify(a) === JSON.stringify(b))
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -223,6 +240,7 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, 
           cwd={entry.cwd}
           branch={entry.gitBranch}
           profile={profile}
+          profiles={profiles}
           commands={commands}
           compacting={model.compacting}
           model={run.model}

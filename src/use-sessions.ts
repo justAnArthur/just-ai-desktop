@@ -411,6 +411,24 @@ export function useSessions() {
     await call('session_kill', { key: id })
   }
 
+  /**
+   * Carries a session on under another profile: its transcript is copied into that profile's config dir (the original
+   * stays), and the next turn resumes there, on that account and its limits. A running process stops first.
+   */
+  async function continueUnder(id: string, profileId: string) {
+    const entry = entryOf(id)
+    const profile = profiles.find(p => p.id === profileId)
+    if (!entry || !profile || entry.profileId === profileId) return
+    if (live.current.has(id)) {
+      await kill(id)
+      for (let waited = 0; live.current.has(id) && waited < 5000; waited += 100) await new Promise(r => setTimeout(r, 100))
+    }
+    await call('copy_session', { fromConfigDir: entry.configDir, toConfigDir: profile.configDir, sessionId: id })
+    // Ahead of the listings: the copy is this session from now on.
+    setStarted(all => [...all.filter(e => e.id !== id), { ...entry, profileId, configDir: profile.configDir, updated: Date.now() }])
+    relist([profile, ...profiles.filter(p => p.id === entry.profileId)], RELIST_DELAY)
+  }
+
   const dismiss = (id: string) => update(id, model => ({ ...model, status: 'idle', error: undefined }))
 
   async function restart(id: string) {
@@ -478,6 +496,7 @@ export function useSessions() {
     respond,
     interrupt,
     kill,
+    continueUnder,
     restart,
     dismiss,
     rename,

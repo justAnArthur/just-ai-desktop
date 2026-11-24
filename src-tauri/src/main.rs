@@ -34,6 +34,7 @@ fn main() {
             sessions::list_sessions,
             sessions::read_transcript,
             sessions::set_session_title,
+            sessions::copy_session,
         ])
         .build(tauri::generate_context!())
         .expect("error while building JustAIDesktop")
