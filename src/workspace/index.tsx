@@ -270,6 +270,8 @@ export default function Workspace() {
   const [renaming, setRenaming] = useState<string>()
   const [paneOpen, setPaneOpen] = useStore('workspace.pane.open', false)
   const [paneTab, setPaneTab] = useStore<PaneTab>('workspace.pane.tab', 'changes')
+  // Taken off the project list by the user, by path: their sessions stay in the sidebar.
+  const [hiddenProjects, setHiddenProjects] = useStore<string[]>('projects.hidden', [])
   const [view, setView] = useState<'sessions' | 'profiles'>('sessions')
   const [signIn, setSignIn] = useState<SignInTarget>()
   const Back = useIcon('arrow-left')
@@ -307,7 +309,7 @@ export default function Workspace() {
   const cwds = new Map(entries.map(e => [e.id, e.cwd]))
   const cwdOf = (id: string) => cwds.get(id) ?? ''
   const grouped = groupSessions(all, cwdOf, sessions)
-  const listed = projectsOf(entries, [])
+  const listed = projectsOf(entries, hiddenProjects)
   // A session folder the list leaves out (a scratch group's New session) stays pickable while it is the target.
   const kept = target.cwd && !listed.some(p => p.path === target.cwd) && entries.some(e => e.cwd === target.cwd) ? target.cwd : undefined
   const projects: Project[] = kept ? [{ label: basename(kept), path: kept }, ...listed] : listed
@@ -364,6 +366,8 @@ export default function Workspace() {
   })
 
   const start = ({ run, ...options }: { cwd: string; profileId: string; text: string; attachments: Attached[]; run: Run }) => {
+    // A new session in a removed folder puts it back on the list.
+    if (hiddenProjects.includes(options.cwd)) setHiddenProjects(hiddenProjects.filter(p => p !== options.cwd))
     setTarget({ cwd: options.cwd, profileId: options.profileId })
     void sessions.start({ ...options, ...flagsOf(run) }).then(id => setRuns(all => ({ ...all, [id]: run })))
   }
@@ -502,6 +506,10 @@ export default function Workspace() {
             onSignIn={profile => signInTo(profile)}
             onAddProfile={() => setSignIn({ kind: 'add' })}
             onManageProfiles={openProfiles}
+            onRemoveProject={path => {
+              setHiddenProjects([...hiddenProjects, path])
+              if (target.cwd === path) setTarget({ ...target, cwd: undefined })
+            }}
             onTargetChange={setTarget}
             onStart={start}
           />

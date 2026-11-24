@@ -19,8 +19,8 @@
     "@just-apps/claude-code": "workspace:*",
     "@just-apps/host-contract": "workspace:*",
     "@just-apps/vite": "workspace:*",
-    "@justanarthur/modo-ui": "^2.6.2",
-    "@justanarthur/modo-ui-ai": "^0.6.2",
+    "@justanarthur/modo-ui": "^2.10.1",
+    "@justanarthur/modo-ui-ai": "^0.6.3",
     "react": "^19",
     "react-dom": "^19"
   },
