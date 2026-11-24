@@ -12,7 +12,7 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import { allow, deny, notInstalled, setModel, setPermissionMode } from '@just-apps/claude-code'
 import { initialSession, type SessionModel } from '@just-apps/claude-code'
 import type { Attached } from '../attachments'
-import { ago, basename, type Entry, groupSessions, inboxOf, statusOf } from '../sessions'
+import { ago, basename, type Entry, groupSessions, inboxOf, projectsOf, statusOf } from '../sessions'
 import { type Exit, NEW, type Sessions, useSessions } from '../use-sessions'
 import { useUpdate } from '../use-update'
 import { attach, Skipped } from './attach'
@@ -307,7 +307,10 @@ export default function Workspace() {
   const cwds = new Map(entries.map(e => [e.id, e.cwd]))
   const cwdOf = (id: string) => cwds.get(id) ?? ''
   const grouped = groupSessions(all, cwdOf, sessions)
-  const projects: Project[] = [...new Set(entries.map(e => e.cwd))].map(path => ({ label: basename(path), path }))
+  const listed = projectsOf(entries, [])
+  // A session folder the list leaves out (a scratch group's New session) stays pickable while it is the target.
+  const kept = target.cwd && !listed.some(p => p.path === target.cwd) && entries.some(e => e.cwd === target.cwd) ? target.cwd : undefined
+  const projects: Project[] = kept ? [{ label: basename(kept), path: kept }, ...listed] : listed
   const inbox = inboxOf(
     all.filter(s => s.status === 'waiting').map(s => ({ session: s, model: models[s.id], at: entries.find(e => e.id === s.id)?.updated ?? now })),
     now,

@@ -135,7 +135,7 @@ function compacted(sessionId: string) {
 }
 
 const mode = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('mock')
-// `?mock=heavy`: the load of real use — 4 profiles × 200 sessions over 30 projects, and long transcripts.
+// `?mock=heavy`: the load of real use — 4 profiles × 200 sessions over 40 projects, and long transcripts.
 const heavy = mode === 'heavy'
 // `?mock=not-installed`: no `claude` on PATH.
 const NOT_FOUND = 'claude not found on PATH'
@@ -152,13 +152,34 @@ const heavyProfiles: ProfileInfo[] = ['~/.claude', '~/.claude-a', '~/.claude-b',
   organizationType: 'claude_max',
 }))
 
+// 40 folders as real use has them: long names, nested worktrees, and the Claude desktop app's and the OS's throwaway folders.
+const heavyProjects = [
+  ...Array.from({ length: 24 }, (_, i) => `/Users/you/projects/project-${i}`),
+  '/Users/you/Projects/justanarthur/just-apps/apps/ai-desktop',
+  '/Users/you/Projects/justanarthur/modo/.worktrees/kit-ux-review',
+  '/Users/you/Projects/acme-corporation/customer-onboarding-service-with-a-really-long-name',
+  '/Users/you/Projects/acme-corporation/ui',
+  '/Users/you/Projects/other-org/ui',
+  '/Users/you/Library/Application Support/Claude/scratch-workspaces/scratch-2026-11-24-e0b2a3',
+  '/Users/you/Library/Application Support/Claude/scratch-workspaces/scratch-2026-11-23-9f1c07',
+  '/Users/you/Library/Application Support/Claude-Work/scratch-workspaces/scratch-2026-11-20-41aa2e',
+  '/private/tmp/claude-501/repro',
+  '/private/var/folders/xy/abc123/T/tmp.k3j2',
+  '/var/folders/xy/abc123/T/bun-test-run',
+  '/tmp/quick-check',
+  '/Users/you/notes',
+  '/Users/you/Desktop/untitled folder',
+  '/Users/you/Documents/Ünïcode-名前-folder',
+  '/Users/you',
+]
+
 const heavySessions = (configDir: string): SessionSummary[] =>
   Array.from({ length: 200 }, (_, i) => {
     const p = heavyProfiles.findIndex(x => x.configDir === configDir)
     const n = p * 200 + i
     return {
       id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
-      cwd: `/Users/you/projects/project-${(n * 7) % 30}`,
+      cwd: heavyProjects[(n * 7) % heavyProjects.length],
       title: `Session ${n}: refactor the thing number ${n % 13} and check the tests`,
       updated: now - n * 600_000,
       gitBranch: n % 3 ? 'main' : `feat/branch-${n % 11}`,
@@ -313,7 +334,7 @@ function stop(key: string) {
 const logins = new Map<string, { timers: ReturnType<typeof setTimeout>[] }>()
 const SIGN_IN_URL = 'https://claude.com/cai/oauth/authorize?code=true&client_id=mock&state=mock'
 
-const profileAt = (configDir: string) => profiles.find(p => p.configDir === configDir)
+const profileAt = (configDir: string) => (heavy ? heavyProfiles : profiles).find(p => p.configDir === configDir)
 
 function endLogin(configDir: string, code: number | null, emit: Context['emit']) {
   logins.get(configDir)?.timers.forEach(clearTimeout)

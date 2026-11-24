@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { Session } from '@justanarthur/modo-ui-ai'
 import { initialSession } from '@just-apps/claude-code'
-import { ago, type Entry, groupSessions, inboxOf, limitsOf, mergeEntries, statusOf } from './sessions'
+import { ago, type Entry, groupSessions, inboxOf, limitsOf, mergeEntries, projectsOf, statusOf, throwaway } from './sessions'
 
 const HOUR = 3_600_000
 const now = Date.UTC(2026, 10, 17, 12)
@@ -68,5 +68,35 @@ test('inbox: one row per waiting prompt', () => {
   }
   expect(inboxOf([{ session, model, at: now - 5 * 60_000 }], now)).toEqual([
     { id: 'r', kind: 'permission', title: 'rm -rf dist', sessionId: 's', session: 'Fix it', project: 'demo', profile: 'p', detail: 'Bash', ago: 5 },
+  ])
+})
+
+test('throwaway folders: scratch workspaces and temp dirs', () => {
+  expect(throwaway('/Users/a/Library/Application Support/Claude/scratch-workspaces/scratch-2026-11-24-e0b2a3')).toBe(true)
+  expect(throwaway('/Users/a/Library/Application Support/Claude-Work/scratch-workspaces/x')).toBe(true)
+  expect(throwaway('/private/tmp/claude-501/repro')).toBe(true)
+  expect(throwaway('/tmp')).toBe(true)
+  expect(throwaway('/var/folders/xy/T/run')).toBe(true)
+  expect(throwaway('/private/var/folders/xy/T/run')).toBe(true)
+  expect(throwaway('/Users/a/tmp/project')).toBe(false)
+  expect(throwaway('/Users/a/Projects/scratch-workspaces-demo')).toBe(false)
+})
+
+test('projects: one per folder, latest session first, less throwaway and hidden ones', () => {
+  const entry = (cwd: string, updated: number): Entry => ({ id: `${cwd}${updated}`, profileId: 'p', configDir: '~/.claude', cwd, updated })
+  const projects = projectsOf(
+    [
+      entry('/Users/a/old', 1),
+      entry('/Users/a/new', 5),
+      entry('/Users/a/old', 9),
+      entry('/tmp/x', 10),
+      entry('/Users/a/hidden', 8),
+      entry('/Users/a/Library/Application Support/Claude/scratch-workspaces/scratch-1', 7),
+    ],
+    ['/Users/a/hidden'],
+  )
+  expect(projects).toEqual([
+    { label: 'old', path: '/Users/a/old' },
+    { label: 'new', path: '/Users/a/new' },
   ])
 })

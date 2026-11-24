@@ -1,4 +1,4 @@
-import type { InboxItem, Session, SessionGroup, SessionStatus, UsageLimit } from '@justanarthur/modo-ui-ai'
+import type { InboxItem, Project, Session, SessionGroup, SessionStatus, UsageLimit } from '@justanarthur/modo-ui-ai'
 import { duration } from '@justanarthur/modo-ui-ai/lib/pace'
 import type { RateLimitInfo } from '@just-apps/claude-code'
 import type { SessionModel } from '@just-apps/claude-code'
@@ -50,6 +50,23 @@ export function ago(at: number, now = Date.now()) {
 }
 
 export const basename = (path: string) => path.replace(/\/+$/, '').split('/').pop() || path
+
+// Folders no one picks again: the Claude desktop app's scratch workspaces and the OS's temp dirs.
+const THROWAWAY = [/\/Library\/Application Support\/Claude[^/]*\/scratch-workspaces\//, /^\/(private\/)?tmp(\/|$)/, /^\/(private\/)?var\/folders\//]
+
+export const throwaway = (path: string) => THROWAWAY.some(re => re.test(path))
+
+/** The folders a new session can pick: one per session cwd, latest session first, less throwaway and hidden ones. */
+export function projectsOf(entries: Entry[], hidden: string[]): Project[] {
+  const latest = new Map<string, number>()
+  for (const { cwd, updated } of entries) {
+    if (!cwd || throwaway(cwd) || hidden.includes(cwd)) continue
+    latest.set(cwd, Math.max(latest.get(cwd) ?? 0, updated))
+  }
+  return [...latest]
+    .sort((a, b) => b[1] - a[1])
+    .map(([path]) => ({ label: basename(path), path }))
+}
 
 export function statusOf(model: SessionModel | undefined, running: boolean, unread: boolean): SessionStatus {
   if (running && model?.status === 'waiting') return 'waiting'
