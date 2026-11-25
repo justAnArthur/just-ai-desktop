@@ -104,6 +104,12 @@ describe('SessionTranscript', () => {
     expect(out).not.toContain('agentId')
   })
 
+  test('a todo list reads as its progress', () => {
+    const todos = [{ content: 'One', status: 'completed' }, { content: 'Two', status: 'pending' }]
+    const model: SessionModel = { ...initialSession, turns: [{ kind: 'tool', id: 't1', name: 'TodoWrite', input: { todos }, children: [], result: 'Todos have been modified successfully.' }] }
+    expect(work(model)).toContain('1 of 2 tasks done')
+  })
+
   test('api error and an odd tool', async () => {
     const model = replay(await lines('auth-error.jsonl'))
     expect(() => html(model)).not.toThrow()

@@ -2,7 +2,7 @@ import { Button, Code, Diff, Markdown } from '@justanarthur/modo-ui'
 import { AgentPrompt, Transcript } from '@justanarthur/modo-ui-ai'
 import { memo, type ReactNode, useMemo, useState } from 'react'
 import { allow, answer, deny, type PermissionUpdate, setPermissionMode } from '@just-apps/claude-code'
-import type { CompactItem, Item, Pending, SessionModel, TextItem, ToolCall, UserItem } from '@just-apps/claude-code'
+import type { CompactItem, Item, Pending, SessionModel, TextItem, Todo, ToolCall, UserItem } from '@just-apps/claude-code'
 import { duration, isAgent, plural, subjectOf, summarize, toolLabel } from '../panes'
 
 const MAX_LINES = 40
@@ -54,7 +54,18 @@ function meta(tool: ToolCall) {
   return n > 1 ? `${n} lines` : undefined
 }
 
+const todosOf = (tool: ToolCall) => (tool.name === 'TodoWrite' && Array.isArray(tool.input.todos) ? (tool.input.todos as Todo[]) : undefined)
+
+// A TodoWrite's result only says the list changed: the row shows the list it wrote.
+function summaryOf(tool: ToolCall) {
+  const todos = todosOf(tool)
+  if (!todos) return summarize(tool.input)
+  return `${todos.filter(t => t.status === 'completed').length} of ${plural(todos.length, 'task')} done`
+}
+
 function body(tool: ToolCall) {
+  const todos = !tool.isError && todosOf(tool)
+  if (todos) return <Markdown>{todos.map(t => `- [${t.status === 'completed' ? 'x' : ' '}] ${t.content}`).join('\n')}</Markdown>
   const change = !tool.isError && edit(tool.name, tool.input)
   if (change) return <Diff lineNumbers={false} patch={change.patch} />
   if (tool.result) return <Code language="plaintext">{clip(tool.result)}</Code>
@@ -103,7 +114,7 @@ export function WorkItems({ items, live }: { items: Item[]; live: Live }) {
             value={tool.id}
             index={index}
             tool={toolLabel(tool.name)}
-            summary={summarize(tool.input)}
+            summary={summaryOf(tool)}
             status={status(tool, live)}
             meta={meta(tool)}
           >

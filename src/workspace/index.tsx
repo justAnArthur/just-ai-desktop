@@ -178,7 +178,10 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, 
   const [skipped, setSkipped] = useState<string[]>([])
   const busy = sessions.running.includes(id) && (model.status === 'running' || model.status === 'waiting')
   const missing = model.status === 'failed' && notInstalled(model.error)
-  const kind = model.status === 'failed' && !missing ? failureOf(model) : undefined
+  const failure = model.status === 'failed' && !missing ? failureOf(model) : undefined
+  // A turn that failed while its process lives on (an API error): the error itself, not a crash to restart.
+  const turnError = failure === 'cli-crashed' && !exit && sessions.running.includes(id) ? model.error : undefined
+  const kind = turnError ? undefined : failure
   const resetsAt = model.rateLimit?.resetsAt
   const pending = model.pending[0]
   const stderr = (exit?.stderr || model.error || '').split('\n').filter(Boolean)
@@ -222,6 +225,8 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, 
             stderr={stderr}
             exitCode={exit ? (exit.code ?? 'signal') : undefined}
             resetsIn={resetsAt ? `in ${duration(Math.max(resetsAt * 1000 - Date.now(), 0) / 3_600_000)}` : undefined}
+            alternatives={kind === 'rate-limited' ? sessions.profiles.filter(p => p.id !== entry.profileId && !sessions.profileState.signedOut.includes(p.id)) : undefined}
+            onSwitchProfile={actions.onProfileChange}
             onRestart={() => sessions.restart(id)}
             onLogin={() => onSignIn(profile, () => sessions.dismiss(id))}
             onDismiss={() => sessions.dismiss(id)}
@@ -245,6 +250,7 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, 
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
         <Skipped reasons={skipped} />
         {model.refused && <p className="m-0 text-caption text-destructive">Claude Code refused: {model.refused}</p>}
+        {turnError && <p className="m-0 line-clamp-3 text-caption text-destructive">The turn failed: {turnError}</p>}
         <SessionComposer
           key={id}
           cwd={entry.cwd}
