@@ -84,6 +84,16 @@ export const SHORTCUTS: ShortcutGroup[] = [
     ],
   },
   {
+    label: 'Prompts',
+    shortcuts: [
+      { label: 'Allow once', keys: ['↩'] },
+      { label: 'Deny, or keep planning', keys: ['Esc'] },
+      { label: 'Pick an answer', keys: ['1–9'] },
+      { label: 'Submit the answer', keys: ['↩'], keywords: ['question'] },
+      { label: 'Submit several answers, or plan feedback', keys: ['⌘↩'] },
+    ],
+  },
+  {
     label: 'Window',
     shortcuts: [
       { label: 'Fold the sessions sidebar', keys: ['['] },

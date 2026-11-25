@@ -31,6 +31,7 @@ test('status: live state only while the process runs', () => {
   expect(statusOf({ ...initialSession, status: 'running' }, true, true)).toBe('running')
   expect(statusOf(waiting, false, true)).toBe('unread')
   expect(statusOf(undefined, false, false)).toBe('idle')
+  expect(statusOf({ ...initialSession, status: 'failed' }, false, true)).toBe('failed')
 })
 
 test('entries: one per id, newest first, keeping a title', () => {

@@ -72,6 +72,7 @@ export function projectsOf(entries: Entry[], hidden: string[]): Project[] {
 export function statusOf(model: SessionModel | undefined, running: boolean, unread: boolean): SessionStatus {
   if (running && model?.status === 'waiting') return 'waiting'
   if (running && (model?.status === 'running' || model?.status === 'starting')) return 'running'
+  if (model?.status === 'failed') return 'failed'
   return unread ? 'unread' : 'idle'
 }
 

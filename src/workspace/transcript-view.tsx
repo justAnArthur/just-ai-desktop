@@ -308,6 +308,7 @@ function Questions({ pending: { requestId, input }, respond }: { pending: Pendin
   return (
     <AgentPrompt.Question
       key={given.length}
+      autoFocus
       question={q.question}
       tag={tag}
       options={q.options ?? []}
@@ -335,6 +336,7 @@ export function PendingPrompt({ pending, respond }: { pending: Pending; respond:
   if (pending.kind === 'plan')
     return (
       <AgentPrompt.Plan
+        autoFocus
         onDecide={(decision, feedback) => {
           if (decision === 'keep-planning') return respond(deny(requestId, feedback.trim() || 'Keep planning.'))
           respond(allow(requestId))
@@ -354,8 +356,9 @@ export function PendingPrompt({ pending, respond }: { pending: Pending; respond:
       command={subjectOf(input) ?? JSON.stringify(input, null, 2)}
       detail={change && <Diff lineNumbers={false} patch={change.patch} />}
       rule={ruleOf(suggestions)}
+      autoFocus
       // The CLI describes an edit by its file name, which the path line already shows.
-      hint={change ? null : (pending.description ?? null)}
+      hint={[!change && pending.description, 'Esc denies'].filter(Boolean).join(' · ')}
       onAnswer={decision => {
         if (decision === 'deny') return respond(deny(requestId, 'Denied by the user.'))
         if (decision === 'once') return respond(allow(requestId))

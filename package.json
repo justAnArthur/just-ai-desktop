@@ -20,7 +20,7 @@
     "@just-apps/host-contract": "workspace:*",
     "@just-apps/vite": "workspace:*",
     "@justanarthur/modo-ui": "^2.10.1",
-    "@justanarthur/modo-ui-ai": "^0.6.3",
+    "@justanarthur/modo-ui-ai": "^0.6.4",
     "react": "^19",
     "react-dom": "^19"
   },
