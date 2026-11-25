@@ -1,5 +1,5 @@
 import { useHost, useStore } from '@just-apps/app-kit'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { type AuthStatus, notInstalled, type ProfileInfo, profileId, signedOut } from '@just-apps/claude-code'
 import { native } from './native/commands'
 import { toProfile, withStatus } from './profiles'
@@ -54,7 +54,8 @@ export function useProfiles() {
     }
   }, [infos, statuses, names])
   const usable = profiles.filter(p => !out.includes(p.id))
-  const refresh = () => setVersion(v => v + 1)
+  // Stable: effects re-read sign-ins with it.
+  const refresh = useCallback(() => setVersion(v => v + 1), [])
   return {
     profiles,
     loading: !infos,
@@ -74,6 +75,12 @@ export function useProfiles() {
     rename: (id: string, name: string) => setNames({ ...names, [id]: name }),
     setDefault: (id: string) => setDefault(id),
     signOut: (configDir: string) => call('auth_logout', { configDir }).finally(refresh),
+    /** Asks `claude auth status` again now: a sign-in read at launch may have expired since. */
+    async check(configDir: string) {
+      const status = await call('auth_status', { configDir })
+      setStatuses(all => ({ ...all, [configDir]: status }))
+      return status
+    },
     refresh,
   }
 }

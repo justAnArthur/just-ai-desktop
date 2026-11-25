@@ -183,6 +183,11 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, 
   const turnError = failure === 'cli-crashed' && !exit && sessions.running.includes(id) ? model.error : undefined
   const kind = turnError ? undefined : failure
   const resetsAt = model.rateLimit?.resetsAt
+  // "Not logged in": the profile's sign-in ended since it was read, so every picker should show it signed out.
+  const refreshProfiles = sessions.profileState.refresh
+  useEffect(() => {
+    if (kind === 'auth-expired') refreshProfiles()
+  }, [kind, refreshProfiles])
   const pending = model.pending[0]
   const stderr = (exit?.stderr || model.error || '').split('\n').filter(Boolean)
   const profileCommands = sessions.profileCommands[entry.profileId]
@@ -207,8 +212,16 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, 
           .continueUnder(id, profileId)
           .then(() => toast.success({ title: `Continues under ${next.name}`, description: `The next message runs on ${next.name}; the copy under ${profile.name} stays as it was.` }))
           .catch(error => toast.error({ title: `Couldn’t move it to ${next.name}`, description: String(error) }))
-      if (sessions.profileState.signedOut.includes(profileId)) onSignIn(next, () => void move())
-      else void move()
+      if (sessions.profileState.signedOut.includes(profileId)) return onSignIn(next, () => void move())
+      if (!sessions.profileState.signedIn.includes(profileId)) return void move()
+      // Its sign-in was read at launch and may have expired since: a chat moved there would fail with "Not logged in".
+      sessions.profileState
+        .check(next.configDir)
+        .then(status => {
+          if (status.loggedIn) void move()
+          else onSignIn(next, () => void move())
+        })
+        .catch(error => toast.error({ title: `Couldn’t check ${next.name}’s sign-in`, description: String(error) }))
     },
   })
   // Kept while unchanged: the composer is memoized, and a new list each render would re-render it with every line.

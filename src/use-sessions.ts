@@ -66,6 +66,9 @@ const IDLE_STOP = 10 * 60_000
 /** How soon after the last refresh a focus refreshes the session lists again: switching windows often re-reads nothing. */
 const FOCUS_STALE = 30_000
 
+/** How soon after the last read a focus re-reads every profile's sign-in: one can expire, or be signed out elsewhere. */
+const AUTH_STALE = 5 * 60_000
+
 /** How many recently viewed sessions keep their transcript in memory; a running or waiting one always does. */
 const KEEP_MODELS = 3
 
@@ -219,6 +222,9 @@ export function useSessions() {
   useEffect(() => {
     if (!loading) return onFocusEvery(host, FOCUS_STALE, () => relist(profiles))
   }, [host, loading, profileKey])
+
+  const refreshProfiles = profileState.refresh
+  useEffect(() => onFocusEvery(host, AUTH_STALE, refreshProfiles), [host, refreshProfiles])
 
   useEffect(
     () =>
