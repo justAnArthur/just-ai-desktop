@@ -3,6 +3,7 @@ import { AUTH_EXIT, AUTH_LINE, type AuthExit, type AuthLine, type AuthStatus, ty
 import { SESSION_EXIT, SESSION_LINE, type SessionExit, type SessionLine, type SessionSummary } from '@just-apps/claude-code'
 import type { GitStatus } from './commands'
 import image from './fixtures/image.png.b64?raw'
+import { ASKS, outputOf } from './mock-prompts'
 import stream from './fixtures/stream.jsonl?raw'
 
 interface Context {
@@ -304,7 +305,17 @@ index 9e4b7a1..0000000
 ]
 let ahead = 1
 
-const live = new Map<string, { session: string; turns: number; timers: ReturnType<typeof setTimeout>[]; bypass: boolean; mode: string }>()
+interface Run {
+  session: string
+  turns: number
+  timers: ReturnType<typeof setTimeout>[]
+  bypass: boolean
+  mode: string
+  /** The prompts waiting for an answer, by request id. */
+  asked: Map<string, { toolUseId: string; kind: string }>
+}
+
+const live = new Map<string, Run>()
 
 function replay(key: string, script: string[], emit: Context['emit'], spread: number) {
   const run = live.get(key)
@@ -321,6 +332,99 @@ function replay(key: string, script: string[], emit: Context['emit'], spread: nu
     }, ((i + 1) * spread) / script.length)
     run.timers.push(timer)
   })
+}
+
+const result = (run: Run, error?: string) => ({
+  type: 'result',
+  subtype: error ? 'error_during_execution' : 'success',
+  is_error: Boolean(error),
+  duration_ms: 4200,
+  num_turns: 1,
+  result: error ?? 'Done.',
+  session_id: run.session,
+  total_cost_usd: 0.0123,
+  usage: { input_tokens: 2, output_tokens: 40 },
+})
+
+const assistant = (run: Run, content: object[], parent: string | null = null) => ({
+  type: 'assistant',
+  message: { id: `msg_${crypto.randomUUID()}`, type: 'message', role: 'assistant', model: 'claude-opus-4-5', content, stop_reason: null, usage: { input_tokens: 2, output_tokens: 40 } },
+  parent_tool_use_id: parent,
+  session_id: run.session,
+  uuid: crypto.randomUUID(),
+})
+
+const toolResult = (run: Run, id: string, content: string, isError = false, parent: string | null = null) => ({
+  type: 'user',
+  message: { role: 'user', content: [{ tool_use_id: id, type: 'tool_result', content, ...(isError && { is_error: true }) }] },
+  parent_tool_use_id: parent,
+  session_id: run.session,
+  uuid: crypto.randomUUID(),
+  timestamp: new Date().toISOString(),
+})
+
+// Ids the replay leaves as they are: it renames `toolu_…` per turn.
+const callId = () => `call_${crypto.randomUUID().slice(0, 8)}`
+
+const showcase = (run: Run) => {
+  const [todo, agent, read, bash, edit] = Array.from({ length: 5 }, callId)
+  const todos = [
+    { content: 'Read the session store', status: 'completed', activeForm: 'Reading the session store' },
+    { content: 'Split it per profile', status: 'in_progress', activeForm: 'Splitting it per profile' },
+    { content: 'Update the callers and tests', status: 'pending', activeForm: 'Updating the callers and tests' },
+  ]
+  const code = Array.from({ length: 80 }, (_, i) => `  const value${i} = compute(${i}) // a long line that goes on past the edge of a narrow window to check overflow`).join('\n')
+  return [
+    assistant(run, [{ type: 'tool_use', id: todo, name: 'TodoWrite', input: { todos } }]),
+    toolResult(run, todo, 'Todos have been modified successfully.'),
+    assistant(run, [{ type: 'tool_use', id: agent, name: 'Agent', input: { description: 'Find the store callers', prompt: 'List every caller of the session store.', subagent_type: 'Explore' } }]),
+    assistant(run, [{ type: 'tool_use', id: read, name: 'Read', input: { file_path: '/Users/you/projects/demo/src/store.ts' } }], agent),
+    toolResult(run, read, '1\texport const store = new Map()', false, agent),
+    toolResult(run, agent, 'Three callers: `src/a.ts`, `src/b.ts` and `src/c.ts`.\nagentId: a1b2c3'),
+    assistant(run, [{ type: 'tool_use', id: bash, name: 'Bash', input: { command: 'bun test', description: 'Run the tests' } }]),
+    toolResult(run, bash, Array.from({ length: 500 }, (_, i) => `(pass) store > case ${i} [0.${i % 10}ms]`).join('\n')),
+    assistant(run, [{ type: 'tool_use', id: edit, name: 'Edit', input: { file_path: '/Users/you/projects/demo/src/store.ts', old_string: 'export const store = new Map()', new_string: 'export const stores = new Map<string, Map<string, Session>>()\nexport const storeOf = (profile: string) => stores.get(profile)' } }]),
+    toolResult(run, edit, 'The file /Users/you/projects/demo/src/store.ts has been updated.'),
+    assistant(run, [{ type: 'text', text: `Split the store. The new module:\n\n\`\`\`ts\nexport function split() {\n${code}\n}\n\`\`\`\n\nAll 500 tests pass.` }]),
+    result(run),
+  ]
+}
+
+/** A turn a message's `mock:<kind>` words ask for: prompts (see ASKS), `tools`, `error`, `crash`; `later` holds it six seconds. */
+function scripted(key: string, run: Run, kinds: string[], emit: Context['emit']) {
+  const init = run.turns++ === 0 ? turn.filter(line => line.includes('"subtype":"init"')).map(line => JSON.parse(line)) : []
+  const spread = kinds.includes('later') ? 6000 : 800
+  const send = (lines: object[], spread: number) => replay(key, lines.map(line => JSON.stringify(line)), emit, spread)
+  if (kinds.includes('crash')) {
+    const timer = setTimeout(() => {
+      stop(key)
+      emit(SESSION_EXIT, { key, code: 1, stderr: 'Error: ENOENT: no such file or directory, open \'/Users/you/.claude/settings.json\'\n    at Object.openSync (node:fs:573:18)' } satisfies SessionExit)
+    }, spread)
+    return run.timers.push(timer)
+  }
+  if (kinds.includes('error')) return send([...init, { type: 'system', subtype: 'status', status: 'requesting' }, result(run, 'API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}')], spread)
+  if (kinds.includes('tools')) return send([...init, ...showcase(run)], 3000)
+  const asks = kinds.filter(kind => kind in ASKS)
+  const calls = asks.map(kind => ({ kind, id: callId(), ...ASKS[kind] }))
+  const requests = calls.map(({ kind, id, tool, input, description, suggestions }) => {
+    const request_id = crypto.randomUUID()
+    run.asked.set(request_id, { toolUseId: id, kind })
+    const request = { subtype: 'can_use_tool', tool_name: tool, display_name: tool, input, tool_use_id: id }
+    if (tool === 'AskUserQuestion') return { type: 'control_request', request_id, request: { ...request, requires_user_interaction: true } }
+    return { type: 'control_request', request_id, request: { ...request, ...(description && { description }), ...(suggestions && { permission_suggestions: suggestions }) } }
+  })
+  send([...init, { type: 'system', subtype: 'status', status: 'requesting' }, assistant(run, calls.map(c => ({ type: 'tool_use', id: c.id, name: c.tool, input: c.input }))), ...requests], spread)
+}
+
+/** The app's answer to a prompt: the tool's result, and the turn's end once nothing waits. */
+function answered(key: string, run: Run, { request_id, response }: { request_id: string; response: { behavior: string; message?: string; updatedInput?: Record<string, unknown> } }, emit: Context['emit']) {
+  const asked = run.asked.get(request_id)
+  if (!asked) return
+  run.asked.delete(request_id)
+  const denied = response.behavior === 'deny'
+  const lines: object[] = [toolResult(run, asked.toolUseId, denied ? (response.message ?? '') : outputOf(ASKS[asked.kind], response.updatedInput), denied)]
+  if (!run.asked.size) lines.push(assistant(run, [{ type: 'text', text: 'Done.' }]), result(run))
+  replay(key, lines.map(line => JSON.stringify(line)), emit, 600)
 }
 
 function stop(key: string) {
@@ -428,7 +532,7 @@ export const mockCommands = {
     if (live.has(key)) throw new Error(`session ${key} is already running`)
     const bypass = args.includes('--allow-dangerously-skip-permissions') || args.includes('--dangerously-skip-permissions')
     const at = args.indexOf('--permission-mode')
-    live.set(key, { session: crypto.randomUUID(), turns: 0, timers: [], bypass, mode: at === -1 ? 'default' : args[at + 1] })
+    live.set(key, { session: crypto.randomUUID(), turns: 0, timers: [], bypass, mode: at === -1 ? 'default' : args[at + 1], asked: new Map() })
     replay(key, startup, emit, 300)
   },
 
@@ -441,7 +545,12 @@ export const mockCommands = {
     const send = (line: object) => emit(SESSION_LINE, { key, line: JSON.stringify(line) } satisfies SessionLine)
     if (message.type === 'control_request') {
       const { subtype, mode } = message.request
-      if (subtype === 'interrupt') run.timers.splice(0).forEach(clearTimeout)
+      if (subtype === 'interrupt') {
+        run.timers.splice(0).forEach(clearTimeout)
+        const cancels = [...run.asked.keys()].map(request_id => ({ type: 'control_cancel_request', request_id }))
+        run.asked.clear()
+        if (cancels.length) replay(key, [...cancels, result(run)].map(line => JSON.stringify(line)), emit, 100)
+      }
       // As the CLI answers: bypass only for a process started to allow it.
       if (subtype === 'set_permission_mode' && mode === 'bypassPermissions' && !run.bypass) {
         const error = 'Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions'
@@ -454,8 +563,13 @@ export const mockCommands = {
       }
       return
     }
+    if (message.type === 'control_response') return answered(key, run, message.response, emit)
     if (message.type !== 'user') return
-    if (message.message.content === '/compact') {
+    const { content } = message.message
+    const text: string = typeof content === 'string' ? content : content.map((b: { text?: string }) => b.text ?? '').join('\n')
+    const kinds = [...text.matchAll(/mock:(\w+)/g)].map(m => m[1])
+    if (kinds.length) return scripted(key, run, kinds, emit)
+    if (content === '/compact') {
       const lines = [
         { type: 'system', subtype: 'status', status: 'compacting' },
         { type: 'system', subtype: 'status', status: null, compact_result: 'success' },
