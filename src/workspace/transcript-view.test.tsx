@@ -115,7 +115,7 @@ describe('SessionTranscript', () => {
       draft: '',
     }
     const out = text(html(odd))
-    expect(work(odd)).toContain('mcp__x__y')
+    expect(work(odd)).toContain('x · y')
     expect(out).toContain('Working…')
     expect(out).toContain('Step one')
   })
@@ -154,6 +154,11 @@ describe('PendingPrompt', () => {
     const always = sent(pending)
     always.props.onAnswer('always')
     expect(always.out).toEqual([{ type: 'control_response', response: { subtype: 'success', request_id: 'r1', response: { behavior: 'allow', updatedPermissions: [rule] } } }])
+  })
+
+  test('a command shows in full', () => {
+    const pending: Pending = { ...base, kind: 'permission', tool: 'Bash', input: { command: 'echo start &&\n  rm -rf ./build' } }
+    expect(prompt(pending)).toContain('rm -rf ./build')
   })
 
   test('plan', () => {

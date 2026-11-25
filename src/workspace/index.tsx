@@ -12,6 +12,7 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import { allow, deny, notInstalled, setModel, setPermissionMode } from '@just-apps/claude-code'
 import { initialSession, type SessionModel } from '@just-apps/claude-code'
 import type { Attached } from '../attachments'
+import { plural } from '../panes'
 import { ago, basename, type Entry, groupSessions, inboxOf, projectsOf, statusOf } from '../sessions'
 import { type Exit, NEW, type Sessions, useSessions } from '../use-sessions'
 import { useUpdate } from '../use-update'
@@ -230,7 +231,16 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, 
       <SessionTranscript
         key={id}
         model={model}
-        footer={pending && <PendingPrompt key={pending.requestId} pending={pending} respond={line => sessions.respond(id, line)} />}
+        footer={
+          pending && (
+            <>
+              {model.pending.length > 1 && (
+                <p className="m-0 text-caption text-muted-foreground">{plural(model.pending.length - 1, 'more prompt')} waiting after this one</p>
+              )}
+              <PendingPrompt key={pending.requestId} pending={pending} respond={line => sessions.respond(id, line)} />
+            </>
+          )
+        }
       />
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
         <Skipped reasons={skipped} />

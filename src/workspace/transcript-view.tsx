@@ -3,7 +3,7 @@ import { AgentPrompt, Transcript } from '@justanarthur/modo-ui-ai'
 import { memo, type ReactNode, useMemo, useState } from 'react'
 import { allow, answer, deny, type PermissionUpdate, setPermissionMode } from '@just-apps/claude-code'
 import type { CompactItem, Item, Pending, SessionModel, TextItem, ToolCall, UserItem } from '@just-apps/claude-code'
-import { duration, isAgent, plural, summarize } from '../panes'
+import { duration, isAgent, plural, subjectOf, summarize, toolLabel } from '../panes'
 
 const MAX_LINES = 40
 const MAX_CHARS = 4000
@@ -102,7 +102,7 @@ export function WorkItems({ items, live }: { items: Item[]; live: Live }) {
             key={tool.id}
             value={tool.id}
             index={index}
-            tool={tool.name}
+            tool={toolLabel(tool.name)}
             summary={summarize(tool.input)}
             status={status(tool, live)}
             meta={meta(tool)}
@@ -338,8 +338,9 @@ export function PendingPrompt({ pending, respond }: { pending: Pending; respond:
   const mode = suggestions.find(s => s.type === 'setMode')?.mode
   return (
     <AgentPrompt.Permission
-      tool={tool}
-      command={summarize(input) || clip(JSON.stringify(input, null, 2))}
+      tool={toolLabel(tool)}
+      // In full: a command's later lines (a heredoc, a `&&` chain) are part of what is allowed.
+      command={subjectOf(input) ?? JSON.stringify(input, null, 2)}
       detail={change && <Diff lineNumbers={false} patch={change.patch} />}
       rule={ruleOf(suggestions)}
       // The CLI describes an edit by its file name, which the path line already shows.

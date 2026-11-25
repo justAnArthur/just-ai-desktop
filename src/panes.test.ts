@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { initialSession, reduce, type SessionModel, type ToolCall } from '@just-apps/claude-code'
-import { sameChanges, tasksOf, touches } from './panes'
+import { sameChanges, subjectOf, summarize, tasksOf, toolLabel, touches } from './panes'
 
 const all = await Bun.file(Bun.fileURLToPath(import.meta.resolve('@just-apps/claude-code/fixtures/subagent.jsonl')))
   .text()
@@ -55,4 +55,12 @@ test('changes compare by value', () => {
   expect(sameChanges([change], [{ ...change }])).toBe(true)
   expect(sameChanges([change], [{ ...change, staged: true }])).toBe(false)
   expect(sameChanges([change], [])).toBe(false)
+})
+
+test('a prompt shows every line of its command; an MCP tool by server and name', () => {
+  const command = 'cat <<EOF > notes.md\nrm -rf ~\nEOF'
+  expect(subjectOf({ command, description: 'Write notes' })).toBe(command)
+  expect(summarize({ command })).toBe('cat <<EOF > notes.md')
+  expect(toolLabel('mcp__github__create_issue')).toBe('github · create_issue')
+  expect(toolLabel('Bash')).toBe('Bash')
 })

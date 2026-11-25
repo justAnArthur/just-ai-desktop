@@ -4,9 +4,15 @@ import type { Item, SessionModel, ToolCall } from '@just-apps/claude-code'
 const TOUCHING = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash'])
 const SUMMARY_KEYS = ['command', 'file_path', 'notebook_path', 'pattern', 'path', 'url', 'query', 'skill', 'description', 'prompt']
 
+/** A tool call's command, path or query in full: what a permission prompt shows, every line of it. */
+export const subjectOf = (input: Record<string, unknown>) =>
+  SUMMARY_KEYS.map(k => input[k]).find((v): v is string => typeof v === 'string' && v !== '')
+
 /** A tool call's input in one line: its command, path or query. */
-export const summarize = (input: Record<string, unknown>) =>
-  SUMMARY_KEYS.map(k => input[k]).find((v): v is string => typeof v === 'string' && v !== '')?.split('\n')[0] ?? ''
+export const summarize = (input: Record<string, unknown>) => subjectOf(input)?.split('\n')[0] ?? ''
+
+/** A tool's name as shown: an MCP tool's `mcp__server__tool` as `server · tool`. */
+export const toolLabel = (name: string) => (name.startsWith('mcp__') ? name.slice(5).split('__').join(' · ') : name)
 
 export const isAgent = (t: ToolCall) => t.name === 'Agent' || t.name === 'Task'
 
