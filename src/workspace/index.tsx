@@ -301,6 +301,15 @@ export default function Workspace() {
   useCommand({ id: 'session.new', title: 'New session', shortcut: 'Mod+N', run: () => show(NEW) })
   useCommand({ id: 'app.settings', title: 'Profiles', shortcut: 'Mod+,', run: openProfiles })
   useEffect(() => host.on('app://open-settings', openProfiles), [host])
+  // Escape leaves Profiles as its back arrow does, unless a dialog or menu over it takes the key.
+  useEffect(() => {
+    if (view !== 'profiles') return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented && !document.querySelector('[role="dialog"], [role="menu"]')) setView('sessions')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [view])
   const signInTo = (profile: Profile, onSignedIn?: () => void) => setSignIn({ kind: 'sign-in', profile, onSignedIn })
 
   const now = Date.now()
