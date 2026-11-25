@@ -211,7 +211,14 @@ function SessionView({ sessions, entry, profile, model, exit, run, onRunChange, 
         sessions
           .continueUnder(id, profileId)
           .then(() => toast.success({ title: `Continues under ${next.name}`, description: `The next message runs on ${next.name}; the copy under ${profile.name} stays as it was.` }))
-          .catch(error => toast.error({ title: `Couldn’t move it to ${next.name}`, description: String(error) }))
+          .catch(error =>
+            toast.error({
+              title: `Couldn’t move it to ${next.name}`,
+              description: /its own later turns/.test(String(error))
+                ? `${next.name}’s copy of this chat went on with turns of its own, so it isn’t overwritten.`
+                : String(error),
+            }),
+          )
       if (sessions.profileState.signedOut.includes(profileId)) return onSignIn(next, () => void move())
       if (!sessions.profileState.signedIn.includes(profileId)) return void move()
       // Its sign-in was read at launch and may have expired since: a chat moved there would fail with "Not logged in".
